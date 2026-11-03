@@ -1,0 +1,10 @@
+{% extends 'base.html' %}{% from '_pagination.html' import render_pagination with context %}{% block content %}<h1>Eski qarzni kiritish</h1><p>Bu yozuv sotuv va ombor qoldig‘iga ta’sir qilmaydi.</p>
+<section class="panel"><form method="post" class="form-grid"><input type="hidden" name="operation_token" value="{{ write_operation_token('opening_debt') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Xaridor nomi *<input name="customer" required maxlength="200"></label>
+<label>Telefon raqami *<input name="customer_phone" type="tel" required maxlength="40"></label>
+<label>Eski qarz summasi (so‘m) *<input name="amount" type="number" min="0.01" step="0.01" required></label>
+<label>Qarz olingan sana *<input name="date" type="date" value="{{ today }}" required></label>
+<label>To‘lov muddati *<input name="due_date" type="date" required></label>
+<label>Izoh<input name="note"></label>
+<button type="submit">Eski qarzni saqlash</button></form></section>
+<section class="panel"><h2>Kiritilgan eski qarzlar</h2><table><tr><th>Xaridor</th><th>Telefon</th><th>Qarz</th><th>Sana</th><th>Muddat</th></tr>{% for r in rows %}<tr><td>{{ r.customer }}</td><td>{{ r.customer_phone }}</td><td>{{ '%.0f'|format(r.amount) }} so‘m</td><td>{{ r.date|business_date }}</td><td>{{ r.due_date|business_date }}</td></tr>{% else %}<tr><td colspan="5">Eski qarz yozuvlari yo‘q.</td></tr>{% endfor %}</table>{{ render_pagination(pagination) }}</section>{% endblock %}

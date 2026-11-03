@@ -1,0 +1,36 @@
+{
+  "mode": "production",
+  "database_path": "/var/lib/tortkuldon/tortkuldon.db",
+  "backup_directory": "/var/backups/tortkuldon",
+  "trusted_hosts": [
+    "tortkoldon.uz",
+    "www.tortkoldon.uz",
+    "127.0.0.1"
+  ],
+  "https_termination": true,
+  "proxy": {
+    "enabled": true,
+    "trusted_hops": 1,
+    "remote_addresses": [
+      "127.0.0.1"
+    ]
+  },
+  "session_lifetime_seconds": 28800,
+  "drain_timeout_seconds": 45,
+  "login_rate_limit": {
+    "attempts": 5,
+    "window_seconds": 900,
+    "ip_attempts": 30,
+    "ip_window_seconds": 900
+  },
+  "waitress": {
+    "host": "127.0.0.1",
+    "port": 8000,
+    "threads": 8
+  },
+  "service_logging": {
+    "path": "/var/log/tortkuldon/app.log",
+    "max_bytes": 10485760,
+    "backup_count": 10
+  }
+}

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="{{ ui_language }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="application-name" content="TO‘RTKO‘LDONMAXSULOTI">
+<meta name="theme-color" content="#073d2e">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="TO‘RTKO‘LDONMAXSULOTI">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
+<link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='pwa-icon-192.png') }}">
+<link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='pwa-icon-180.png') }}">
+<title>{{ t('company.name') }}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+<style>.language-switch{display:flex;align-items:center;gap:6px;margin:0;font-size:12px}.language-switch label{white-space:nowrap}.language-switch select{width:auto;min-width:94px;padding:6px}.language-switch button{padding:6px 9px}</style>
+<style>.user-chip form{display:inline;margin:0}.user-chip form button{background:none;border:0;color:#047857;font:inherit;font-weight:600;padding:0;text-decoration:underline;text-decoration-color:transparent;text-underline-offset:3px;cursor:pointer}.user-chip form button:hover{color:#065f46;text-decoration-color:#34d399}</style>
+</head>
+<body>
+{% if session.get('user_id') and session.get('role') not in ('umid','maxmud','ishchi') %}
+<aside class="sidebar">
+<div class="side-brand"><span class="brand-icon">🌾</span><div><strong>{{ t('company.name') }}</strong><small>{{ t('nav.brand_subtitle') }}</small></div></div>
+<nav class="side-nav">
+{% if session.get('role')=='rahbar' %}
+<a href="{{ url_for('boss_statistics') }}">📊 {{ t('nav.statistics') }}</a>
+<a href="{{ url_for('warehouses') }}">🏭 {{ t('nav.warehouses') }}</a>
+<a href="{{ url_for('debtors_page') }}">👥 {{ t('nav.debtors') }}</a>
+<a href="{{ url_for('reports') }}">📈 {{ t('nav.reports') }}</a>
+<a href="{{ url_for('excel_report',type='stocks') }}">📥 {{ t('nav.warehouse_excel') }}</a>
+<a href="{{ url_for('unified_excel_report') }}">📥 {{ t('nav.unified_excel') }}</a>
+{% else %}
+<a class="{{ 'active' if request.endpoint=='dashboard' else '' }}" href="{{ url_for('dashboard') }}">⌂ <span>{{ t('nav.home') }}</span></a>
+<a class="{{ 'active' if request.endpoint=='wheat' else '' }}" href="{{ url_for('wheat') }}">🌾 <span>{{ t('nav.wheat') }}</span></a>
+<a href="{{ url_for('warehouses') }}">🏭 {{ t('nav.warehouses') }}</a>
+<a class="{{ 'active' if request.endpoint in ('sales_page','edit_sale') else '' }}" href="{{ url_for('sales_page') }}">🛒 <span>{{ t('nav.sales') }}</span></a>
+<a class="{{ 'active' if request.endpoint in ('invoices_page','invoice_print') else '' }}" href="{{ url_for('invoices_page') }}">📄 <span>{{ t('nav.invoices') }}</span></a>
+<a class="{{ 'active' if request.endpoint in ('debtors_page','opening_debt_page') else '' }}" href="{{ url_for('debtors_page') }}">♟ <span>{{ t('nav.customer_debts') }}</span></a>
+<a class="{{ 'active' if request.endpoint=='payments_page' else '' }}" href="{{ url_for('payments_page') }}">💰 <span>{{ t('nav.payments') }}</span></a>
+<a class="{{ 'active' if request.endpoint=='expenses_page' else '' }}" href="{{ url_for('expenses_page') }}">▣ <span>{{ t('nav.expenses') }}</span></a>
+<a href="{{ url_for('worker_admin') }}">👥 {{ t('nav.worker_cash') }}</a>
+<a href="{{ url_for('control_page') }}">🚨 {{ t('nav.debt_stock_control') }}</a>
+<a class="{{ 'active' if request.endpoint=='combined_finance_page' else '' }}" href="{{ url_for('combined_finance_page') }}">📊 <span>{{ t('nav.finance_reports') }}</span></a>
+{% if session.get('role')=='buxgalter' %}<a href="{{ url_for('backup_page') }}">💾 {{ t('nav.backup') }}</a>{% endif %}
+<a class="{{ 'active' if request.endpoint=='reports' else '' }}" href="{{ url_for('reports') }}">▥ <span>{{ t('nav.reports') }}</span></a>
+{% if session.get('role')=='buxgalter' %}<a class="{{ 'active' if request.endpoint=='setup' else '' }}" href="{{ url_for('setup') }}">⚙ <span>{{ t('nav.settings') }}</span></a>{% endif %}
+{% if session.get('role')=='buxgalter' %}<a href="{{ url_for('manage_users') }}">👤 {{ t('nav.users') }}</a>{% endif %}
+{% endif %}
+</nav>
+<div class="side-bottom"><img class="side-bottom-logo" src="{{ url_for('static', filename='company_logo.png') }}" alt="{{ t('nav.logo_alt') }}"><span>{{ t('nav.motto') }}</span></div>
+</aside>
+{% endif %}
+<div class="app-shell">
+<header class="topbar">
+<div class="topbar-left"><button type="button" class="menu-toggle" onclick="document.body.classList.toggle('menu-open')" aria-label="{{ t('nav.menu_open') }}">☰</button><span>🌾 {{ t('company.name') }}</span><span class="top-date" id="top-date"></span></div>
+<form class="language-switch" method="post" action="{{ url_for('set_language') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="next" value="{{ request.full_path }}">
+<label for="ui-language">{{ t('language.select') }}</label>
+<select id="ui-language" name="language">
+<option value="uz-Latn" {{ 'selected' if ui_language == 'uz-Latn' else '' }}>{{ t('language.latin') }}</option>
+<option value="uz-Cyrl" {{ 'selected' if ui_language == 'uz-Cyrl' else '' }}>{{ t('language.cyrillic') }}</option>
+</select>
+<button type="submit" aria-label="{{ t('language.apply') }}">↻</button>
+</form>
+{% if session.get('user_id') %}
+<div class="user-chip">● <strong>{{ session.get('username') }}</strong> · {{ t('role.' ~ session.get('role')) }} <a href="{{ url_for('change_password') }}">{{ t('nav.password') }}</a> <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit">{{ t('nav.logout') }}</button></form></div>
+{% endif %}
+</header>
+<main>
+{% for category, message in get_flashed_messages(with_categories=true) %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+{% block content %}{% endblock %}
+</main>
+<footer>{{ t('footer') }}</footer>
+</div>
+<script>document.getElementById('top-date').textContent=new Date().toLocaleDateString('{{ ui_date_locale }}',{year:'numeric',month:'long',day:'numeric'});</script>
+<script>
+if ('serviceWorker' in navigator && window.isSecureContext) {
+    navigator.serviceWorker.register('{{ url_for("service_worker") }}', {scope: '/'})
+        .catch(error => console.error('PWA service worker registration failed:', error));
+}
+</script>
+</body>
+</html>

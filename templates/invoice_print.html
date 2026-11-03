@@ -1,0 +1,10 @@
+<!doctype html><html lang="uz"><head><meta charset="utf-8"><title>Nakladnoy №{{ r.number }}</title>
+<style>@page{size:A4 portrait;margin:0}*{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111;margin:0;background:#eee}.paper{width:210mm;min-height:297mm;margin:auto;background:white}.half{height:148.5mm;padding:12mm 13mm 8mm;position:relative}h1{text-align:center;font-size:17pt;margin:0 0 3mm}h2{text-align:center;font-size:13pt;margin:0 0 7mm}.info{display:flex;justify-content:space-between;font-size:11pt;margin-bottom:5mm}.line{font-size:11pt;margin:3mm 0}table{border-collapse:collapse;width:100%;margin-top:7mm;font-size:10pt}th,td{border:1px solid #222;padding:3mm;text-align:center}.sign{display:flex;justify-content:space-between;margin-top:15mm;font-size:10pt}.controls{padding:12px;text-align:center;background:#e4e4e4}.controls button{padding:10px 25px;background:#197a43;color:white;border:0;border-radius:6px;cursor:pointer}@media print{body{background:white}.controls{display:none}.paper{margin:0}.half{height:148.5mm}}</style></head><body>
+<div class="controls"><button onclick="window.print()">🖨 Chop etish (A4)</button> <span>Printerda A4, masshtab 100%, sahifa chetlari: yo‘q</span></div>
+<div class="paper"><div class="half"><h1>TO‘RTKO‘LDONMAXSULOTI</h1><h2>YUK XATI (NAKLADNOY)</h2>
+<div class="info"><strong>{{ group_name }} — № {{ r.number }}</strong><span>Sana: {{ r.issued_date|business_date }}</span></div>
+<div class="line"><b>Xaridor:</b> {{ r.customer }}</div><div class="line"><b>Telefon:</b> {{ r.customer_phone }}</div>
+<table><tr><th>№</th><th>Mahsulot</th><th>Qop og‘irligi</th><th>Qop soni</th><th>Jami og‘irlik</th></tr>
+<tr><td>1</td><td>{{ r.product }}</td><td>{% if r.sale_mode=='qop' and r.bag_kg %}{{ '%g'|format(r.bag_kg) }} kg{% else %}—{% endif %}</td><td>{% if r.sale_mode=='qop' and r.bag_count %}{{ '%g'|format(r.bag_count) }}{% else %}Rassipnoy{% endif %}</td><td>{{ '%g'|format(r.qty_kg) }} kg</td></tr></table>
+<div class="sign"><span>Topshiruvchi: _______________</span><span>Qabul qiluvchi: _______________</span></div>
+</div></div></body></html>

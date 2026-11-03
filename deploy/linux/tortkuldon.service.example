@@ -1,0 +1,32 @@
+[Unit]
+Description=ToRtkoERP Flask application (Gunicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=tortkuldon
+Group=tortkuldon
+WorkingDirectory=/opt/tortkuldon/current
+Environment=ERP_MODE=production
+Environment=ERP_CONFIG_PATH=/etc/tortkuldon/production.json
+Environment=ERP_SECRET_FILE=/etc/tortkuldon/session_secret
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/tortkuldon/venv/bin/gunicorn --config /opt/tortkuldon/current/deploy/linux/gunicorn.conf.py
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=90
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+ReadWritePaths=/var/lib/tortkuldon /var/backups/tortkuldon /var/log/tortkuldon
+
+[Install]
+WantedBy=multi-user.target

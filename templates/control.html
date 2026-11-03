@@ -1,0 +1,31 @@
+{% extends 'base.html' %}{% from '_pagination.html' import render_pagination with context %}{% block content %}
+<h1>Qarz va ombor nazorati</h1>
+<section class="panel">
+  <h2>🔴 Muddati o‘tgan qarzlar</h2>
+  <table><tr><th>Xaridor</th><th>Qarz</th><th>Kechikkan kun</th></tr>
+    {% for r,d in overdue %}
+    <tr><td><a href="{{ url_for('customer_statement',customer=r.customer) }}">{{ r.customer }}</a></td><td>{{ '%.0f'|format(r.debt) }}</td><td>{{ d }}</td></tr>
+    {% else %}<tr><td colspan="3">Muddati o‘tgan qarzlar yo‘q.</td></tr>{% endfor %}
+  </table>
+  {{ render_pagination(overdue_pagination) }}
+
+  <h2>🟡 3 kun ichida to‘lanadiganlar</h2>
+  <table><tr><th>Xaridor</th><th>Qarz</th><th>Muddatgacha kun</th></tr>
+    {% for r,d in upcoming %}
+    <tr><td><a href="{{ url_for('customer_statement',customer=r.customer) }}">{{ r.customer }}</a></td><td>{{ '%.0f'|format(r.debt) }}</td><td>{{ d }} kun</td></tr>
+    {% else %}<tr><td colspan="3">Yaqin muddatli qarzlar yo‘q.</td></tr>{% endfor %}
+  </table>
+  {{ render_pagination(upcoming_pagination) }}
+</section>
+<section class="panel">
+  <h2>Ombor kam qoldiq ogohlantirishlari</h2>
+  <table><tr><th>Mahsulot</th><th>Qoldiq kg</th><th>Chegara kg</th><th>Holat</th></tr>
+    {% for name in products %}
+    <tr><td>{{ name }}</td><td>{{ '%.2f'|format(stocks.get(name,0)) }}</td><td>{{ limits.get(name,500) }}</td><td>{% if stocks.get(name,0)<limits.get(name,500) %}🔴 Kam{% else %}🟢 Yetarli{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+  {% if session.get('role')=='rahbar' %}
+  <form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><select name="product">{% for p in products %}<option>{{ p }}</option>{% endfor %}</select><input type="number" name="min_kg" min="0" value="500" step="0.01"><button>Chegarani saqlash</button></form>
+  {% endif %}
+</section>
+{% endblock %}

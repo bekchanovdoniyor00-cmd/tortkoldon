@@ -1,0 +1,66 @@
+{% extends 'base.html' %}{% block content %}<div class="page-title"><div><h1>{{ t('dashboard.title') }}</h1><p>{{ t('dashboard.welcome') }}</p></div><span class="pill">{{ t('dashboard.test_version') }}</span></div>
+<div class="cards overview dashboard-card-grid dashboard-inventory" id="omborlar">
+<div class="metric"><span class="metric-icon">🌾</span><div><span>{{ t('dashboard.wheat_stock') }}</span><strong>{{ '{:,.0f}'.format(wheat_stock).replace(',', ' ') }} {{ t('dashboard.unit_kg') }}</strong><small>{{ t('dashboard.raw_stock') }}</small></div></div>
+<div class="metric"><span class="metric-icon">▣</span><div><span>{{ t('dashboard.flour_stock') }}</span><strong>{{ '{:,.0f}'.format(flour_stock).replace(',', ' ') }} {{ t('dashboard.unit_kg') }}</strong><small>{{ t('dashboard.finished_stock') }}</small></div></div>
+<div class="metric"><span class="metric-icon">◉</span><div><span>{{ t('dashboard.bran_stock') }}</span><strong>{{ '{:,.0f}'.format(bran_stock).replace(',', ' ') }} {{ t('dashboard.unit_kg') }}</strong><small>{{ t('dashboard.product_stock') }}</small></div></div>
+<div class="metric"><span class="metric-icon">⚙</span><div><span>{{ t('dashboard.muchka_stock') }}</span><strong>{{ '{:,.0f}'.format(muchka_stock).replace(',', ' ') }} {{ t('dashboard.unit_kg') }}</strong><small>{{ t('dashboard.product_stock') }}</small></div></div>
+<div class="metric"><span class="metric-icon">▤</span><div><span>{{ t('dashboard.telashka_stock') }}</span><strong>{{ '{:,.0f}'.format(telashka_stock).replace(',', ' ') }} {{ t('dashboard.unit_kg') }}</strong><small>{{ t('dashboard.product_stock') }}</small></div></div>
+</div>
+<div class="cards overview dashboard-card-grid dashboard-finance">
+<div class="metric"><span class="metric-icon">🛒</span><div><span>{{ t('dashboard.sales_income') }}</span><strong id="financial-sales">{{ '{:,.2f}'.format(sales_total).replace(',', ' ') }} {{ t('dashboard.currency') }}</strong><small>{{ t('dashboard.active_sales_only') }}</small></div></div>
+<div class="metric"><span class="metric-icon">✓</span><div><span>{{ t('dashboard.received_money') }}</span><strong id="financial-received">{{ '{:,.2f}'.format(paid_total).replace(',', ' ') }} {{ t('dashboard.currency') }}</strong><small>{{ t('dashboard.payment_once') }}</small></div></div>
+<div class="metric"><span class="metric-icon">♟</span><div><span>{{ t('dashboard.debt_balance') }}</span><strong id="financial-debt">{{ '{:,.2f}'.format(debts).replace(',', ' ') }} {{ t('dashboard.currency') }}</strong><small>{{ t('dashboard.active_obligations') }}</small></div></div>
+<div class="metric"><span class="metric-icon">⚡</span><div><span>{{ t('dashboard.expenses') }}</span><strong>{{ '{:,.0f}'.format(expense_total).replace(',', ' ') }} {{ t('dashboard.currency') }}</strong><small>{{ t('dashboard.total_expenses') }}</small></div></div>
+</div>
+<div class="dashboard-audit-grid">
+<section class="panel dashboard-financial-explanation" id="financial-explanation"><h2>{{ t('dashboard.financial_explanation') }}</h2><p>{{ t('dashboard.all_dates_note') }}</p><div class="dashboard-payment-breakdown"><div class="dashboard-payment-card"><span>{{ t('dashboard.initial_payments') }}</span><strong>{{ '{:,.2f}'.format(financial_totals.initial_received).replace(',', ' ') }} {{ t('dashboard.currency') }}</strong></div><div class="dashboard-payment-card"><span>{{ t('dashboard.followup_payments') }}</span><strong>{{ '{:,.2f}'.format(financial_totals.linked_received).replace(',', ' ') }} {{ t('dashboard.currency') }}</strong></div><div class="dashboard-payment-card"><span>{{ t('dashboard.old_payments') }}</span><strong>{{ '{:,.2f}'.format(financial_totals.legacy_received).replace(',', ' ') }} {{ t('dashboard.currency') }}</strong></div></div><p>{{ t('dashboard.accountant_receipts') }} {{ '{:,.2f}'.format(financial_totals.accountant_collected_receipts).replace(',', ' ') }} {{ t('dashboard.currency') }}. {{ t('dashboard.receipt_not_extra') }}</p>{% if financial_totals.excess %}<p>{{ t('dashboard.excess_payment') }} {{ '{:,.2f}'.format(financial_totals.excess).replace(',', ' ') }} {{ t('dashboard.currency') }}. {{ t('dashboard.excess_not_transferred') }}</p>{% endif %}{% if financial_totals.unallocated_legacy %}<p>{{ t('dashboard.unallocated_payment') }} {{ '{:,.2f}'.format(financial_totals.unallocated_legacy).replace(',', ' ') }} {{ t('dashboard.currency') }}. {{ t('dashboard.unallocated_explanation') }}</p>{% endif %}</section>
+{% if financial_warnings %}
+{% set warning_text = {
+'same_name_multiple_phones': t('dashboard.warning.same_name_multiple_phones'),
+'legacy_identity_ambiguous': t('dashboard.warning.legacy_identity_ambiguous'),
+'legacy_without_obligation': t('dashboard.warning.legacy_without_obligation'),
+'legacy_fifo_not_explicit_link': t('dashboard.warning.legacy_fifo_not_explicit_link'),
+'cancelled_sale_initial_payment': t('dashboard.warning.cancelled_sale_initial_payment'),
+'receipt_without_active_sale': t('dashboard.warning.receipt_without_active_sale'),
+'accountant_receipt_mismatch': t('dashboard.warning.accountant_receipt_mismatch'),
+'accountant_receipt_without_source': t('dashboard.warning.accountant_receipt_without_source'),
+'sale_overpaid': t('dashboard.warning.sale_overpaid')
+} %}
+<section class="panel dashboard-financial-warnings" id="financial-warnings"><h2><span class="dashboard-warning-icon" aria-hidden="true">!</span>{{ t('dashboard.warning_title') }}</h2><ul class="dashboard-warning-list">{% for warning in financial_warnings %}<li>{{ warning_text.get(warning.code, t('dashboard.warning.fallback')) }}{% if warning.customer is defined %} {{ t('dashboard.customer') }} {{ warning.customer }}.{% endif %}{% if warning.sale_id is defined %} {{ t('dashboard.sale_number') }}{{ warning.sale_id }}.{% endif %}{% if warning.receipt_id is defined %} {{ t('dashboard.payment_number') }}{{ warning.receipt_id }}.{% endif %}{% if warning.payment_ids is defined %} {{ t('dashboard.old_payments_list') }} {{ warning.payment_ids|join(', ') }}.{% endif %}</li>{% endfor %}</ul><p>{{ t('dashboard.data_unchanged') }}</p></section>
+{% endif %}
+</div>
+<div class="dashboard-grid dashboard-chart-actions-grid">
+<section class="panel chart-panel dashboard-sales-chart">
+<h2>{{ t('dashboard.last_seven_days') }}</h2>
+{% set week_totals = namespace(un=0, qora_un=0, kepak=0, muchka=0, telashka=0, total=0) %}
+<div class="dashboard-sales-table-wrap">
+<table class="dashboard-sales-table">
+<thead><tr><th>{{ t('dashboard.date') }}</th><th class="dashboard-sales-col-un">{{ t('dashboard.flour') }}</th><th class="dashboard-sales-col-qora-un">{{ t('dashboard.black_flour') }}</th><th class="dashboard-sales-col-kepak">{{ t('dashboard.bran') }}</th><th class="dashboard-sales-col-muchka">{{ t('dashboard.muchka') }}</th><th class="dashboard-sales-col-telashka">{{ t('dashboard.telashka') }}</th><th class="dashboard-sales-col-total">{{ t('dashboard.daily_total') }}</th></tr></thead>
+<tbody>
+{% for day in daily_sales %}
+{% set day_total = day.un + day['qora-un'] + day.kepak + day.muchka + day.telashka %}
+{% set week_totals.un = week_totals.un + day.un %}
+{% set week_totals.qora_un = week_totals.qora_un + day['qora-un'] %}
+{% set week_totals.kepak = week_totals.kepak + day.kepak %}
+{% set week_totals.muchka = week_totals.muchka + day.muchka %}
+{% set week_totals.telashka = week_totals.telashka + day.telashka %}
+{% set week_totals.total = week_totals.total + day_total %}
+<tr><th scope="row">{{ day.label }}</th><td class="dashboard-sales-col-un">{{ '{:,.2f}'.format(day.un) if day.un else '0' }} {{ t('dashboard.unit_kg') }}</td><td class="dashboard-sales-col-qora-un">{{ '{:,.2f}'.format(day['qora-un']) if day['qora-un'] else '0' }} {{ t('dashboard.unit_kg') }}</td><td class="dashboard-sales-col-kepak">{{ '{:,.2f}'.format(day.kepak) if day.kepak else '0' }} {{ t('dashboard.unit_kg') }}</td><td class="dashboard-sales-col-muchka">{{ '{:,.2f}'.format(day.muchka) if day.muchka else '0' }} {{ t('dashboard.unit_kg') }}</td><td class="dashboard-sales-col-telashka">{{ '{:,.2f}'.format(day.telashka) if day.telashka else '0' }} {{ t('dashboard.unit_kg') }}</td><td class="dashboard-sales-col-total">{{ '{:,.2f}'.format(day_total) if day_total else '0' }} {{ t('dashboard.unit_kg') }}</td></tr>
+{% endfor %}
+</tbody>
+<tfoot><tr><th scope="row">{{ t('dashboard.week_total') }}</th><td class="dashboard-sales-col-un">{{ '{:,.2f}'.format(week_totals.un) if week_totals.un else '0' }} {{ t('dashboard.unit_kg') }}</td><td class="dashboard-sales-col-qora-un">{{ '{:,.2f}'.format(week_totals.qora_un) if week_totals.qora_un else '0' }} {{ t('dashboard.unit_kg') }}</td><td class="dashboard-sales-col-kepak">{{ '{:,.2f}'.format(week_totals.kepak) if week_totals.kepak else '0' }} {{ t('dashboard.unit_kg') }}</td><td class="dashboard-sales-col-muchka">{{ '{:,.2f}'.format(week_totals.muchka) if week_totals.muchka else '0' }} {{ t('dashboard.unit_kg') }}</td><td class="dashboard-sales-col-telashka">{{ '{:,.2f}'.format(week_totals.telashka) if week_totals.telashka else '0' }} {{ t('dashboard.unit_kg') }}</td><td class="dashboard-sales-col-total">{{ '{:,.2f}'.format(week_totals.total) if week_totals.total else '0' }} {{ t('dashboard.unit_kg') }}</td></tr></tfoot>
+</table>
+</div>
+</section>
+<section class="panel dashboard-quick-panel">
+<h2>{{ t('dashboard.quick_actions') }}</h2>
+<div class="quick dashboard-quick-actions">
+<a href="{{ url_for('wheat') }}">＋ {{ t('dashboard.buy_wheat') }}</a>
+<a href="{{ url_for('production_page') }}">＋ {{ t('dashboard.production') }}</a>
+<a href="{{ url_for('sales_page') }}">＋ {{ t('dashboard.enter_sale') }}</a>
+<a href="{{ url_for('expenses_page') }}">＋ {{ t('dashboard.enter_expense') }}</a>
+<a href="{{ url_for('reports') }}">▥ {{ t('dashboard.reports') }}</a>
+</div>
+</section>
+</div>
+<div class="columns"><section class="panel"><h2>{{ t('dashboard.recent_sales') }}</h2><div class="table-scroll"><table><tr><th>{{ t('dashboard.date') }}</th><th>{{ t('dashboard.customer_name') }}</th><th>{{ t('dashboard.product') }}</th><th>{{ t('dashboard.kilograms') }}</th></tr>{% for r in recent_sales %}<tr><td>{{ r.date|business_date }}</td><td>{{ r.customer }}</td><td>{{ r.product }}</td><td>{{ '%.2f'|format(r.qty_kg) }}</td></tr>{% else %}<tr><td colspan="4">{{ t('dashboard.no_sales') }}</td></tr>{% endfor %}</table></div></section><section class="panel"><h2>{{ t('dashboard.recent_wheat') }}</h2><div class="table-scroll"><table><tr><th>{{ t('dashboard.date') }}</th><th>{{ t('dashboard.supplier') }}</th><th>{{ t('dashboard.net_purchase_kg') }}</th></tr>{% for r in recent_receipts %}<tr><td>{{ r.date|business_date }}</td><td>{{ r.supplier or '—' }}</td><td>{{ '%.2f'|format(r.net) }}</td></tr>{% else %}<tr><td colspan="3">{{ t('dashboard.no_incoming') }}</td></tr>{% endfor %}</table></div></section></div>{% endblock %}

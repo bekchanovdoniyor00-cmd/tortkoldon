@@ -1,0 +1,173 @@
+{% extends 'base.html' %}{% block content %}
+{% set expense_category_keys = {'Yo‘l haqi':'employee.expense_category.travel','Yuk tushirish':'employee.expense_category.unloading','Transport':'employee.expense_category.transport','Boshqa xarajat':'employee.expense_category.other'} %}
+{% set transfer_status_keys = {'pending':'employee.pending_status','approved':'employee.approved_status','rejected':'employee.rejected_status'} %}
+<style>
+.wdash{max-width:1480px;margin:auto;color:#123d32}
+.wdash .wh{margin:8px 0 18px}.wdash .wh h2{margin:0 0 6px}.wdash .wh p{margin:0;color:#667b75}
+.wstats,.wlinks{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:14px}
+.wstat{border-radius:13px;padding:17px;background:#e9f7ee;border:1px solid #d5e9dc}
+.wstat:nth-child(2){background:#edf4ff}.wstat:nth-child(3){background:#fff5de}.wstat:nth-child(4){background:#fff0f0}
+.wstat span{display:block;font-weight:700}.wstat strong{display:block;font-size:24px;margin-top:9px;overflow-wrap:anywhere}
+.wlink{display:block;padding:16px 9px;text-align:center;color:white!important;text-decoration:none!important;font-weight:bold;border-radius:10px;background:#078354}
+.wlink:nth-child(2){background:#255bc6}.wlink:nth-child(3){background:#dc7900}.wlink:nth-child(4){background:#7938aa}
+.wcols{display:grid;grid-template-columns:minmax(0,1.05fr) minmax(0,1fr);gap:15px;align-items:start}
+.wdash .wcard{background:rgba(255,255,255,.96);border:1px solid #dbe8e0;border-radius:13px;padding:17px;margin-bottom:14px;min-width:0}
+.wdash .wcard h3{margin:0 0 15px}.wdash .wcard input,.wdash .wcard select{max-width:100%;box-sizing:border-box}
+.wdash .wcard #worker-sale-form p{margin:0 0 13px}
+.wdash .wcard #worker-sale-form input,.wdash .wcard #worker-sale-form select{width:100%}
+.wdash .wcard #worker-sale-form button{width:auto}
+.wdash .wcard #customer-results{max-width:100%!important}
+.wscroll{overflow-x:auto}.wscroll table{min-width:690px;font-size:13px}
+.wscroll td,.wscroll th{padding:8px 6px}
+.wdash .wcard small{font-size:12px}
+@media(max-width:1100px){.wcols{grid-template-columns:1fr}.wstats,.wlinks{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:580px){.wstats,.wlinks{grid-template-columns:1fr}.wstat strong{font-size:21px}}
+</style>
+<div class="wdash">
+<div class="wh"><h2>{{ role_name }} — {{ t('employee.personal_account') }}</h2><p><b>{{ t('employee.sold_products') }}</b> {{ products|join(', ') }}</p></div>
+{% set ns = namespace(debt=0) %}
+{% for r in rows %}
+  {% if not r.cancelled %}
+    {% set rem = r.qty_kg*r.price_per_kg-r.paid-r.receipts %}
+    {% if rem > 0 %}{% set ns.debt = ns.debt + rem %}{% endif %}
+  {% endif %}
+{% endfor %}
+<div class="wstats">
+ <div class="wstat"><span>💰 {{ t('cash.worker.nav.cash') }}</span><strong>{{ '{:,.0f}'.format(balance) }} {{ t('common.som') }}</strong></div>
+ <div class="wstat"><span>📦 {{ t('employee.today_sales') }}</span><strong id="wd-count">—</strong><small id="wd-sales-total"></small></div>
+ <div class="wstat"><span>💵 {{ t('employee.today_receipts') }}</span><strong id="wd-cash">—</strong></div>
+ <div class="wstat"><span>📒 {{ t('employee.remaining_debt') }}</span><strong>{{ '{:,.0f}'.format(ns.debt) }} {{ t('common.som') }}</strong><small>{{ t('employee.personal_active_sales') }}</small></div>
+</div>
+<div class="wlinks">
+<a class="wlink" href="#wd-new">＋ {{ t('cash.worker.nav.new_sale') }}</a>
+<a class="wlink" href="#wd-history">💳 {{ t('cash.worker.nav.debt_payment') }}</a>
+<a class="wlink" href="#wd-history">📋 {{ t('cash.worker.nav.archive') }}</a>
+<a class="wlink" href="#wd-customer">👥 {{ t('cash.worker.nav.customers') }}</a>
+</div>
+<div class="wcols"><div>
+<div class="wcard" id="wd-new"><h3>🛒 {{ t('employee.new_sale_debt') }}</h3>
+<form method="post" action="{{ url_for('worker_new_sale') }}" id="worker-sale-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<p><label>{{ t('employee.customer_required') }} <input id="customer-name" name="customer" autocomplete="off" required></label>
+<label>{{ t('employee.phone_required') }} <input id="customer-phone" name="customer_phone" type="tel" autocomplete="off" placeholder="+998 90 123 45 67" required></label>
+<input type="hidden" id="customer-id" name="customer_id"></p>
+<div id="customer-results" style="border:1px solid #ccc;padding:8px;display:none;max-width:600px"></div>
+<p><small>{{ t('employee.customer_lookup_help') }}</small></p>
+<p>{{ t('common.product') }} <select name="product" id="w-product" required>{% for p in products %}<option value="{{ p }}">{{ p }}</option>{% endfor %}</select>
+{{ t('employee.sale_type') }} <select name="sale_mode" id="w-mode"><option value="qop">{{ t('employee.bag') }}</option><option value="kg">{{ t('employee.loose_sale') }}</option></select></p>
+<p id="w-bag-fields">{{ t('employee.bag_weight') }} <select name="bag_kg" id="w-bag"></select> {{ t('employee.bag_count') }} <input type="number" name="bag_count" id="w-count" min="1" step="1" value="1"></p>
+<p id="w-loose-fields" style="display:none">{{ t('employee.kilograms') }} <input type="number" name="qty_kg" id="w-qty" min="0.01" step="any"></p>
+<p><span id="w-price-label">{{ t('employee.bag_unit_price') }}</span> <input type="number" name="price" min="0.01" step="any" required>
+{{ t('employee.submit_cash') }} <input type="number" name="paid" min="0" step="any" value="0" required></p>
+<p>{{ t('common.note') }} <input name="note"> <button type="submit">{{ t('sales.save') }}</button></p>
+<small>{{ t('employee.sale_debt_formula') }}</small>
+</form>
+</div>
+<script>
+(function(){
+const bags={{ bag_options|tojson }}, loose={{ loose_products|tojson }};
+const ui={kg:{{ t('common.kg')|tojson }},bagPrice:{{ t('employee.bag_unit_price')|tojson }},kgPrice:{{ t('employee.kg_unit_price')|tojson }},notFoundNew:{{ t('employee.customer_not_found_new')|tojson }},searchFailed:{{ t('employee.search_failed')|tojson }},notFound:{{ t('employee.customer_not_found')|tojson }},searchError:{{ t('employee.search_error')|tojson }},selectFirst:{{ t('employee.select_customer_first')|tojson }}};
+const product=document.getElementById('w-product'), mode=document.getElementById('w-mode'), bag=document.getElementById('w-bag');
+const count=document.getElementById('w-count'), qty=document.getElementById('w-qty');
+function update(){
+ const p=product.value, sizes=bags[p]||[], canLoose=loose.includes(p);
+ const previous=bag.value;
+ bag.innerHTML=''; sizes.forEach(n=>{const o=document.createElement('option');o.value=n;o.textContent=n+' '+ui.kg;bag.appendChild(o)});
+ if(sizes.map(String).includes(previous)) bag.value=previous;
+ mode.querySelector('option[value="qop"]').disabled=!sizes.length;
+ mode.querySelector('option[value="kg"]').disabled=!canLoose;
+ if((mode.value==='kg'&&!canLoose)||(mode.value==='qop'&&!sizes.length)) mode.value=sizes.length?'qop':'kg';
+ const isBag=mode.value==='qop';
+ document.getElementById('w-bag-fields').style.display=isBag?'':'none';
+ document.getElementById('w-loose-fields').style.display=isBag?'none':'';
+ bag.disabled=!isBag;count.disabled=!isBag;qty.disabled=isBag;
+ qty.required=!isBag;count.required=isBag;
+ document.getElementById('w-price-label').textContent=isBag?ui.bagPrice:ui.kgPrice;
+}
+product.addEventListener('change',update);mode.addEventListener('change',update);update();
+})();
+</script>
+<div class="wcard" id="wd-customer"><h3>👥 {{ t('employee.customer_edit_title') }}</h3>
+<p>{{ t('employee.customer_edit_help') }}</p>
+<div><input id="edit-customer-search" autocomplete="off" placeholder="{{ t('employee.customer_search_placeholder') }}" style="width:100%;max-width:480px"><div id="edit-customer-results" style="display:none;border:1px solid #ccc;padding:8px;margin:6px 0;max-width:480px"></div></div>
+<form method="post" action="{{ url_for('worker_customer_edit') }}" id="customer-edit-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="customer_id" id="edit-customer-id" required>
+<input name="customer" id="edit-customer-name" required placeholder="{{ t('employee.customer_name_placeholder') }}">
+<input name="customer_phone" id="edit-customer-phone" required placeholder="{{ t('employee.phone_placeholder') }}">
+<button type="submit" id="edit-customer-submit" disabled>{{ t('employee.update_customer') }}</button></form></div>
+<script>
+(function(){
+ const name=document.getElementById('customer-name'),phone=document.getElementById('customer-phone'),id=document.getElementById('customer-id'),box=document.getElementById('customer-results');
+ let timer,sequence=0;
+ function reset(){id.value='';}
+ function search(value){
+  clearTimeout(timer);const seq=++sequence;
+  if(value.trim().length<2){box.style.display='none';return;}
+  timer=setTimeout(async()=>{
+   try {const res=await fetch({{ url_for('worker_customer_search')|tojson }}+'?q='+encodeURIComponent(value));
+   const data=await res.json();if(seq!==sequence)return;
+   box.replaceChildren();
+   if(!data.customers.length){box.textContent=ui.notFoundNew;}
+   data.customers.forEach(c=>{const btn=document.createElement('button');btn.type='button';btn.textContent=c.name+' — '+c.phone;
+    btn.style.display='block';btn.style.margin='4px';btn.onclick=()=>{++sequence;name.value=c.name;phone.value=c.phone;id.value=c.id;box.style.display='none';};box.appendChild(btn)});
+   box.style.display='block';
+   }catch(e){box.style.display='none';}
+  },220);
+ }
+ name.addEventListener('input',()=>{reset();search(name.value)});
+ phone.addEventListener('input',()=>{reset();search(phone.value)});
+ const editSearch=document.getElementById('edit-customer-search');
+ const editBox=document.getElementById('edit-customer-results');
+ const editId=document.getElementById('edit-customer-id');
+ const editName=document.getElementById('edit-customer-name');
+ const editPhone=document.getElementById('edit-customer-phone');
+ const editSubmit=document.getElementById('edit-customer-submit');
+ let editTimer,editSequence=0;
+ editSearch.addEventListener('input',()=>{
+  editId.value='';editName.value='';editPhone.value='';editSubmit.disabled=true;
+  clearTimeout(editTimer);const seq=++editSequence;const value=editSearch.value.trim();
+  if(value.length<2){editBox.style.display='none';return;}
+  editTimer=setTimeout(async()=>{
+   try {
+    const res=await fetch({{ url_for('worker_customer_search')|tojson }}+'?q='+encodeURIComponent(value));
+    if(!res.ok)throw new Error(ui.searchFailed);
+    const data=await res.json();if(seq!==editSequence)return;
+    editBox.replaceChildren();
+    if(!data.customers.length)editBox.textContent=ui.notFound;
+    data.customers.forEach(c=>{
+     const btn=document.createElement('button');btn.type='button';btn.textContent=c.name+' — '+c.phone;
+     btn.style.display='block';btn.style.margin='4px';
+     btn.onclick=()=>{++editSequence;editSearch.value=c.name+' — '+c.phone;editId.value=c.id;editName.value=c.name;editPhone.value=c.phone;editSubmit.disabled=false;editBox.style.display='none';};
+     editBox.appendChild(btn);
+    });
+    editBox.style.display='block';
+   }catch(e){editBox.textContent=ui.searchError;editBox.style.display='block';}
+  },220);
+ });
+ document.getElementById('customer-edit-form').addEventListener('submit',e=>{
+  if(!editId.value.trim()){e.preventDefault();alert(ui.selectFirst);}
+ });
+})();
+</script>
+</div><div>
+<div class="wcard" id="wd-history"><div class="wscroll"><h3>{{ t('employee.sales_and_receipts') }}</h3><table><thead><tr><th>{{ t('common.date') }}</th><th>{{ t('common.customer') }}</th><th>{{ t('common.product') }}</th><th>{{ t('common.amount') }}</th><th>{{ t('employee.cash_label') }}</th><th>{{ t('employee.remaining') }}</th><th>{{ t('cash.worker.nav.debt_payment') }}</th></tr></thead><tbody>{% for r in rows %}{% set remain = r.qty_kg*r.price_per_kg-r.paid-r.receipts %}<tr class="wd-sale-row" data-date="{{ r.date|e }}" data-total="{{ (r.qty_kg*r.price_per_kg)|e }}" data-paid="{{ r.paid|e }}" data-cancelled="{{ 1 if r.cancelled else 0 }}"><td>{{ r.date|business_date }}</td><td>{{ r.customer }}</td><td>{{ r.product }}</td><td>{{ '{:,.0f}'.format(r.qty_kg*r.price_per_kg) }}</td><td>{{ '{:,.0f}'.format(r.paid+r.receipts) }}</td><td>{{ t('employee.cancelled') if r.cancelled else '{:,.0f}'.format(remain) }}</td><td>{% if not r.cancelled and remain>0.01 %}<form method="post" action="{{ url_for('worker_receipt') }}"><input type="hidden" name="operation_token" value="{{ worker_receipt_token(r) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="sale_id" value="{{ r.id }}"><input type="number" name="amount" min="0.01" step="any" max="{{ remain }}" required style="width:125px"><button>{{ t('employee.accept') }}</button></form>{% endif %}</td></tr>{% else %}<tr><td colspan="7">{{ t('employee.no_sales') }}</td></tr>{% endfor %}</tbody></table></div></div>
+<div class="wcard"><h3>{{ t('cash.worker.expense') }}</h3><form method="post" action="{{ url_for('worker_expense') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><select name="category"><option value="Yo‘l haqi">{{ t('employee.expense_category.travel') }}</option><option value="Yuk tushirish">{{ t('employee.expense_category.unloading') }}</option><option value="Transport">{{ t('employee.expense_category.transport') }}</option><option value="Boshqa xarajat">{{ t('employee.expense_category.other') }}</option></select><input type="number" name="amount" min="0.01" step="any" placeholder="{{ t('common.amount') }}" required><input name="note" placeholder="{{ t('common.note') }}"><button>{{ t('common.save') }}</button></form><h3>{{ t('cash.worker.transfer_to_accountant') }}</h3><form method="post" action="{{ url_for('worker_transfer') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="number" name="amount" min="0.01" step="any" required placeholder="{{ t('common.amount') }}"><button>{{ t('cash.worker.send_for_approval') }}</button></form><p>{{ t('cash.worker.approval_note') }}</p></div>
+<div class="wcard"><h3>{{ t('cash.worker.expenses') }}</h3>{% for x in expenses %}{% set category_key = expense_category_keys.get(x.category) %}<p>{{ x.date }} — {{ t(category_key) if category_key else x.category }} — {{ '{:,.0f}'.format(x.amount) }} {{ t('common.som') }}</p>{% else %}<p>{{ t('cash.worker.none') }}</p>{% endfor %}<h3>{{ t('cash.worker.receipt_requests') }}</h3>{% for item in transfers %}{% set status_key = transfer_status_keys.get(item.status) %}<p>{{ item.created_at }} — {{ '{:,.0f}'.format(item.amount) }} {{ t('common.som') }} — {{ t(status_key) if status_key else item.status }}</p>{% else %}<p>{{ t('cash.worker.none') }}</p>{% endfor %}</div>
+</div></div></div>
+<script>
+(function(){
+const d=new Date(),today=[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');
+const ui={count:{{ t('employee.today_suffix')|tojson }},som:{{ t('common.som')|tojson }}};
+let count=0,total=0,cash=0;
+document.querySelectorAll('.wd-sale-row').forEach(r=>{
+ if(r.dataset.cancelled==='1'||!r.dataset.date.startsWith(today))return;
+ count++;total+=Number(r.dataset.total)||0;cash+=Number(r.dataset.paid)||0;
+});
+const fmt=n=>Math.round(n).toLocaleString('en-US')+' '+ui.som;
+document.getElementById('wd-count').textContent=count+' '+ui.count;
+document.getElementById('wd-sales-total').textContent=fmt(total);
+document.getElementById('wd-cash').textContent=fmt(cash);
+})();
+</script>
+{% endblock %}

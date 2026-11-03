@@ -1,0 +1,119 @@
+{% extends 'base.html' %}{% block content %}
+<style>
+.ms{max-width:1290px;margin:20px auto;padding:0 16px;font-family:system-ui,sans-serif;color:#204a3e}.ms *{box-sizing:border-box}
+.ms-hero{background:linear-gradient(115deg,#075743,#13866c);color:white;padding:22px 26px;border-radius:19px}.ms-hero h1{margin:0;color:white!important;font-size:26px}.ms-hero p{margin:4px 0;color:#e0f8ee}
+.ms-nav{display:flex;flex-wrap:wrap;gap:8px;margin:15px 0}.ms-nav a{background:white;border:1px solid #dce9e2;border-radius:11px;padding:10px 13px;text-decoration:none;color:#175b44;font-weight:650}.ms-nav a.active{background:#e3f5eb}
+.ms-card{background:#fff;border:1px solid #dce8e1;border-radius:17px;padding:20px;margin-bottom:15px}.ms-card h2{font-size:19px;margin:0 0 15px;color:#145842}
+.ms-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:11px}.ms-grid.two{grid-template-columns:repeat(2,minmax(0,1fr))}
+.ms-field{display:flex;flex-direction:column;gap:5px;font-size:13px;font-weight:600}.ms input,.ms select{width:100%;min-width:0;border:1px solid #c9dbd1;border-radius:9px;background:white;padding:11px;font:inherit;font-size:14px;color:#193e32}
+.ms-item{background:#f6faf7;border:1px solid #dcece2;border-radius:13px;padding:15px;margin:10px 0}.ms-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:9px}
+.ms-btn{background:#087856;color:white;border:0;border-radius:10px;padding:11px 16px;font-weight:700;cursor:pointer}.ms-btn.secondary{background:#e1f3e9;color:#126048}.ms-btn.remove{background:#fff1f0;color:#9d302c;padding:7px 10px}.ms-btn:disabled{opacity:.5}
+.ms-stock-error{display:none;color:#b42318;font-weight:700;font-size:13px;margin:10px 0 0}.ms-item.stock-invalid{border:2px solid #cf352a}
+.ms-total{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.ms-total div{border-radius:13px;background:#e8f5ef;padding:15px}.ms-total b{display:block;font-size:21px;margin-top:6px;color:#126049}.ms-note{color:#658075;font-size:12px;margin:8px 0}
+@media(max-width:750px){.ms-grid,.ms-grid.two,.ms-total{grid-template-columns:1fr}.ms-card{padding:13px}.ms-hero{padding:18px}}
+</style>
+<div class="ms"><header class="ms-hero"><h1>{{ role_name }} — {{ t('employee.personal_account') }}</h1><p>TO‘RTKO‘L DON MAHSULOTI · {{ t('cash.worker.panel') }}</p></header>
+<nav class="ms-nav"><a href="{{ url_for('worker_sales') }}">{{ t('cash.worker.nav.home') }}</a><a class="active" href="{{ url_for('worker_sale_form') }}">{{ t('cash.worker.nav.new_sale') }}</a><a href="{{ url_for('worker_debts') }}">{{ t('cash.worker.nav.debt_payment') }}</a><a href="{{ url_for('worker_archive') }}">{{ t('cash.worker.nav.archive') }}</a><a href="{{ url_for('worker_customers_page') }}">{{ t('cash.worker.nav.customers') }}</a><a href="{{ url_for('worker_cash_page') }}">{{ t('cash.worker.nav.cash') }}</a></nav>
+<form method="post" action="{{ url_for('worker_multi_sale') }}" id="worker-sale-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="submission_token" value="{{ sale_token }}"><input type="hidden" id="customer-id" name="customer_id"><input type="hidden" name="items_json" id="items-json">
+<section class="ms-card"><h2>1. {{ t('employee.customer_data') }}</h2><div class="ms-grid two"><label class="ms-field">{{ t('employee.customer_required') }}<input name="customer" id="customer-name" autocomplete="off" required></label><label class="ms-field">{{ t('employee.phone_required') }}<input name="customer_phone" id="customer-phone" type="tel" autocomplete="off" placeholder="+998 90 123 45 67" required></label></div><div id="customer-results" style="display:none;border:1px solid #cbded1;padding:8px;margin-top:8px;border-radius:10px"></div><p class="ms-note">{{ t('employee.customer_lookup_help') }}</p></section>
+<section class="ms-card"><h2>2. {{ t('employee.items_section') }}</h2><div id="sale-items"></div><p id="stock-load-error" class="ms-stock-error">{{ t('employee.stock_error') }}</p><button type="button" class="ms-btn secondary" id="add-item">＋ {{ t('employee.add_product') }}</button></section>
+<section class="ms-card"><h2>3. {{ t('employee.payment_section') }}</h2><div class="ms-grid"><label class="ms-field">💵 {{ t('common.cash') }} ({{ t('common.som') }})<input type="number" name="pay_naqd" class="pay-value" min="0" step="0.01" value="0"></label><label class="ms-field">💳 {{ t('common.card') }} ({{ t('common.som') }})<input type="number" name="pay_plastik" class="pay-value" min="0" step="0.01" value="0"></label><label class="ms-field">🏦 {{ t('employee.bank_payment') }} ({{ t('common.som') }})<input type="number" name="pay_hisob" class="pay-value" min="0" step="0.01" value="0"></label></div><div class="ms-total" style="margin-top:14px"><div>{{ t('employee.total_sale') }}<b id="sale-total">0 {{ t('common.som') }}</b></div><div>{{ t('employee.paid') }}<b id="sale-paid">0 {{ t('common.som') }}</b></div><div>{{ t('employee.remaining') }}<b id="sale-debt">0 {{ t('common.som') }}</b></div></div></section>
+<section class="ms-card"><div class="ms-grid two"><label class="ms-field">{{ t('common.note') }}<input name="note" placeholder="{{ t('employee.optional') }}"></label><div style="display:flex;align-items:end"><button type="submit" class="ms-btn" style="width:100%">{{ t('employee.save_and_invoice') }}</button></div></div><p class="ms-note">{{ t('employee.invoice_price_note') }}</p></section>
+</form></div>
+<script>
+(function(){
+const products={{ products|tojson }},bags={{ bag_options|tojson }},loose={{ loose_products|tojson }};
+const ui={kg:{{ t('common.kg')|tojson }},som:{{ t('common.som')|tojson }},bag:{{ t('employee.bag')|tojson }},looseSale:{{ t('employee.loose_sale')|tojson }},bagWeight:{{ t('employee.bag_weight')|tojson }},bagCount:{{ t('employee.bag_count')|tojson }},kilograms:{{ t('employee.kilograms')|tojson }},bagPrice:{{ t('employee.bag_unit_price')|tojson }},kgPrice:{{ t('employee.kg_unit_price')|tojson }},product:{{ t('common.product')|tojson }},productTotal:{{ t('employee.product_total')|tojson }},remove:{{ t('employee.remove')|tojson }},stockInsufficient:{{ t('employee.stock_insufficient')|tojson }},maximum:{{ t('employee.max_quantity')|tojson }},bagsUnit:{{ t('employee.bags_unit')|tojson }},stockError:{{ t('employee.stock_error')|tojson }},serverError:{{ t('employee.server_no_response')|tojson }},stockNotFound:{{ t('employee.stock_not_found')|tojson }},saleTotal:{{ t('employee.total_sale')|tojson }},paid:{{ t('employee.paid')|tojson }},remaining:{{ t('employee.remaining')|tojson }},saleCheck:{{ t('employee.sale_check')|tojson }},saveConfirm:{{ t('employee.save_sale_confirm')|tojson }},customerNotFound:{{ t('employee.customer_not_found')|tojson }}};
+const wrap=document.getElementById('sale-items'),form=document.getElementById('worker-sale-form');
+const formatter=new Intl.NumberFormat('en-US',{maximumFractionDigits:2});
+const stockUrl={{ url_for('worker_stock_status')|tojson }};
+let stocks=null,bagStocks=null;
+const saveButton=form.querySelector('button[type=submit]');
+function checkStock(){
+  let invalid=!stocks;
+  const requested={},requestedBags={};
+  for(const row of wrap.children){
+    const p=row.querySelector('.p').value;
+    const isBag=row.querySelector('.mode').value==='qop';
+    const bagSize=num(row.querySelector('.bag').value);
+    const q=isBag?num(row.querySelector('.count').value)*bagSize:num(row.querySelector('.qty').value);
+    requested[p]=(requested[p]||0)+q;
+    if(isBag&&bagStocks&&bagStocks[p]){const key=p+':'+bagSize;requestedBags[key]=(requestedBags[key]||0)+num(row.querySelector('.count').value);}
+  }
+  for(const row of wrap.children){
+    const p=row.querySelector('.p').value;
+    const isBag=row.querySelector('.mode').value==='qop';
+    const bagSize=num(row.querySelector('.bag').value);
+    const remaining=stocks?Math.max(0,Number(stocks[p]||0)):0;
+    const bagKey=p+':'+bagSize,availableBags=bagStocks&&bagStocks[p]?Number(bagStocks[p][bagSize]||0):0;
+    const tooManyBags=isBag&&bagStocks&&bagStocks[p]&&requestedBags[bagKey]>availableBags;
+    const tooMuch=stocks && (requested[p]>remaining+0.000001||tooManyBags);
+    const warning=row.querySelector('.ms-stock-error');
+    if(tooMuch){
+      const max=isBag&&bagSize>0?Math.min(availableBags,Math.floor((remaining+0.000001)/bagSize)):Math.max(0,Math.floor(remaining*100)/100);
+      warning.textContent=ui.stockInsufficient+' ('+ui.maximum+' '+formatter.format(max)+(isBag?' '+ui.bagsUnit+' '+bagSize+' '+ui.kg+' '+ui.bag:' '+ui.kg)+').';
+      warning.style.display='block';invalid=true;
+    }else{warning.textContent='';warning.style.display='none';}
+    row.classList.toggle('stock-invalid',!!tooMuch);
+  }
+  saveButton.disabled=invalid;
+  return !invalid;
+}
+async function loadStock(){
+  try{
+    const response=await fetch(stockUrl,{cache:'no-store',credentials:'same-origin'});
+    if(!response.ok)throw new Error(ui.serverError);
+    const data=await response.json();
+    if(!data.stocks||!data.bag_stocks)throw new Error(ui.stockNotFound);
+    stocks=data.stocks;bagStocks=data.bag_stocks;
+    document.getElementById('stock-load-error').style.display='none';
+  }catch(e){stocks=null;document.getElementById('stock-load-error').style.display='block';}
+  checkStock();
+}
+
+function num(v){const n=Number(v);return Number.isFinite(n)?n:0}
+function field(label,html){return '<label class="ms-field">'+label+html+'</label>'}
+function update(row){
+ const p=row.querySelector('.p').value,mode=row.querySelector('.mode'),bag=row.querySelector('.bag');
+ const prev=bag.value;bag.innerHTML=(bags[p]||[]).map(n=>'<option value="'+n+'">'+n+' '+ui.kg+'</option>').join('');if((bags[p]||[]).map(String).includes(prev))bag.value=prev;
+ const opts=mode.options;opts[0].disabled=!(bags[p]||[]).length;opts[1].disabled=!loose.includes(p);
+ if(mode.selectedOptions[0].disabled)mode.value=(bags[p]||[]).length?'qop':'kg';
+ const bagMode=mode.value==='qop';row.querySelector('.bag').disabled=!bagMode;row.querySelector('.count').disabled=!bagMode;row.querySelector('.qty').disabled=bagMode;
+ row.querySelector('.bag-wrap').style.display=bagMode?'':'none';row.querySelector('.count-wrap').style.display=bagMode?'':'none';row.querySelector('.qty-wrap').style.display=bagMode?'none':'';
+ row.querySelector('.count').required=bagMode;row.querySelector('.qty').required=!bagMode;row.querySelector('.unit-price-label').textContent=bagMode?ui.bagPrice:ui.kgPrice;calc();
+}
+function add(){if(wrap.children.length>=15)return;
+ const row=document.createElement('div');row.className='ms-item';row.innerHTML='<div class="ms-top"><strong>'+ui.product+' <span class="n"></span></strong><button type="button" class="ms-btn remove">'+ui.remove+'</button></div><div class="ms-grid">'+
+ field(ui.product,'<select class="p">'+products.map(p=>'<option>'+p+'</option>').join('')+'</select>')+
+ field({{ t('employee.sale_type')|tojson }},'<select class="mode"><option value="qop">'+ui.bag+'</option><option value="kg">'+ui.looseSale+'</option></select>')+
+ '<span class="ms-field bag-wrap">'+ui.bagWeight+'<select class="bag"></select></span>'+
+ '<span class="ms-field count-wrap">'+ui.bagCount+'<input class="count" type="number" min="1" step="1" value="1" required></span>'+
+ '<span class="ms-field qty-wrap">'+ui.kilograms+'<input class="qty" type="number" min="0.01" step="any"></span>'+
+ field('<span class="unit-price-label">'+ui.bagPrice+'</span>','<input class="price" type="number" min="0.01" step="any" required>')+
+ field(ui.productTotal,'<input class="line-total" readonly tabindex="-1">')+'</div><p class="ms-stock-error" aria-live="polite"></p>';
+ wrap.appendChild(row);row.querySelector('.p').addEventListener('change',()=>update(row));row.querySelector('.mode').addEventListener('change',()=>update(row));row.querySelectorAll('input').forEach(x=>x.addEventListener('input',calc));row.querySelector('.remove').onclick=()=>{if(wrap.children.length>1){row.remove();renumber();calc()}};renumber();update(row);
+}
+function renumber(){[...wrap.children].forEach((r,i)=>r.querySelector('.n').textContent=i+1)}
+function calc(){let total=0;for(const row of wrap.children){const bag=row.querySelector('.mode').value==='qop';const quantity=bag?num(row.querySelector('.count').value):num(row.querySelector('.qty').value);const price=num(row.querySelector('.price').value);const amount=quantity*price;row.querySelector('.line-total').value=formatter.format(amount);total+=amount}
+ const paid=[...document.querySelectorAll('.pay-value')].reduce((s,e)=>s+num(e.value),0);
+ document.getElementById('sale-total').textContent=formatter.format(total)+' '+ui.som;document.getElementById('sale-paid').textContent=formatter.format(paid)+' '+ui.som;document.getElementById('sale-debt').textContent=formatter.format(Math.max(0,total-paid))+' '+ui.som;document.getElementById('sale-debt').style.color=paid>total+0.001?'#bd392d':'#126049';checkStock();}
+ document.getElementById('add-item').onclick=add;document.querySelectorAll('.pay-value').forEach(x=>x.addEventListener('input',calc));add();loadStock();
+ form.addEventListener('submit',e=>{
+  if(!checkStock()){e.preventDefault();return;}
+ const items=[...wrap.children].map(r=>({product:r.querySelector('.p').value,sale_mode:r.querySelector('.mode').value,bag_kg:r.querySelector('.bag').value,bag_count:r.querySelector('.count').value,qty_kg:r.querySelector('.qty').value,price:r.querySelector('.price').value}));
+ const total=items.reduce((s,i)=>s+(i.sale_mode==='qop'?num(i.bag_count):num(i.qty_kg))*num(i.price),0);
+ const paid=[...document.querySelectorAll('.pay-value')].reduce((s,x)=>s+num(x.value),0);
+ if(total<=0||paid>total+0.001){e.preventDefault();alert(ui.saleCheck);return;}
+ document.getElementById('items-json').value=JSON.stringify(items);
+ if(!confirm(ui.saveConfirm))e.preventDefault();
+ });
+ // Existing customer lookup: choose a known card, without changing server-side ownership validation.
+ const name=document.getElementById('customer-name'),phone=document.getElementById('customer-phone'),id=document.getElementById('customer-id'),results=document.getElementById('customer-results');
+ const customerSearchUrl={{ url_for('worker_customer_search')|tojson }},customerSearchError={{ t('employee.search_error')|tojson }};
+ let timer,searchSequence=0;
+ function hideResults(){results.replaceChildren();results.style.display='none'}
+ function search(source){clearTimeout(timer);const sequence=++searchSequence;id.value='';const q=source.value.trim();if(q.length<2){hideResults();return}timer=setTimeout(async()=>{try{const resp=await fetch(customerSearchUrl+'?q='+encodeURIComponent(q),{credentials:'same-origin',headers:{Accept:'application/json'}});if(!resp.ok)throw new Error('Customer search failed with status '+resp.status);const data=await resp.json();if(sequence!==searchSequence)return;results.replaceChildren();for(const customer of data.customers){const button=document.createElement('button');button.type='button';button.className='ms-btn secondary';button.style.margin='4px';button.textContent=customer.name+' — '+customer.phone;button.addEventListener('click',()=>{clearTimeout(timer);searchSequence++;name.value=customer.name;phone.value=customer.phone;id.value=String(customer.id);hideResults()});results.appendChild(button)}results.style.display=data.customers.length?'block':'none'}catch(error){if(sequence!==searchSequence)return;results.replaceChildren();const message=document.createElement('span');message.textContent=customerSearchError;results.appendChild(message);results.style.display='block'}},250)}
+ name.addEventListener('input',()=>search(name));phone.addEventListener('input',()=>search(phone));
+})();
+</script>{% endblock %}

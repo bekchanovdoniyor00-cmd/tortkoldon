@@ -1,0 +1,9 @@
+{% extends 'base.html' %}{% block content %}
+<section class="panel" style="max-width:660px;margin:35px auto;text-align:center">
+<h1>✅ Sotuv saqlandi</h1><p>Nakladnoy <b>№ {{ invoice.number }}</b> arxivga saqlandi.</p>
+<h2>Nakladnoyni chop etasizmi?</h2>
+<div style="display:flex;justify-content:center;gap:16px;flex-wrap:wrap">
+<a class="btn" style="padding:12px 28px;background:#197a43;color:white;border-radius:8px" href="{{ url_for('invoice_print',invoice_id=invoice.id) }}" target="_blank">HA — Chop etish</a>
+<a class="btn" style="padding:12px 28px;background:#e7ece9;color:#173b25;border-radius:8px" href="{{ url_for('sales_page') }}">YO‘Q — Sotuvga qaytish</a>
+</div><p style="margin-top:20px">«YO‘Q» tanlansa ham nakladnoy arxivda qoladi.</p>
+</section>{% endblock %}

@@ -1,0 +1,28 @@
+{% extends 'base.html' %}{% from '_pagination.html' import render_pagination with context %}{% block content %}
+<style>
+:root{--wgreen:#076d51}
+.w-shell{max-width:1320px;margin:20px auto;padding:0 14px;color:#183d35;font-family:system-ui,sans-serif}
+.w-hero{padding:24px 28px;background:linear-gradient(120deg,#0b614b,#138468);border-radius:20px;color:white;margin-bottom:18px}
+.w-hero h1{margin:0;font-size:27px;color:#fff!important}.w-hero p{margin:8px 0 0;opacity:1;color:#ecfff8!important}
+.w-menu{display:flex;flex-wrap:wrap;gap:9px;margin:0 0 22px}
+.w-menu a{padding:11px 15px;background:white;border:1px solid #dce8e2;border-radius:12px;text-decoration:none;color:#165b47;font-weight:650}
+.w-menu a:hover{background:#e7f6ee}
+.w-body{background:white;border:1px solid #e0e9e4;border-radius:17px;padding:22px;box-shadow:0 8px 22px #173e3010}
+.w-body .card{box-shadow:none;border:0;padding:0!important}
+.w-body input,.w-body select{max-width:100%;box-sizing:border-box}
+.w-table{overflow-x:auto}.w-table table{min-width:780px}
+.w-tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}
+.w-tile{border-radius:16px;padding:22px;background:#e8f6ef}.w-tile:nth-child(2){background:#ecf2fe}.w-tile:nth-child(3){background:#fff3df}
+.w-tile strong{font-size:27px;display:block;margin-top:10px}
+@media(max-width:700px){.w-tiles{grid-template-columns:1fr}.w-hero{padding:18px}}
+{% set payment_method_keys = {'naqd':'common.cash','plastik':'common.card','hisob':'common.bank'} %}
+</style><div class="w-shell"><div class="w-hero"><h1>{{ role_name }} — {{ t('employee.personal_account') }}</h1><p>TO‘RTKO‘L DON MAHSULOTI · {{ t('cash.worker.panel') }}</p></div>
+<nav class="w-menu">
+<a href="{{ url_for('worker_sales') }}">{{ t('cash.worker.nav.home') }}</a>
+<a href="{{ url_for('worker_sale_form') }}">{{ t('cash.worker.nav.new_sale') }}</a>
+<a href="{{ url_for('worker_debts') }}">{{ t('cash.worker.nav.debt_payment') }}</a>
+<a href="{{ url_for('worker_archive') }}">{{ t('cash.worker.nav.archive') }}</a>
+<a href="{{ url_for('worker_customers_page') }}">{{ t('cash.worker.nav.customers') }}</a>
+<a href="{{ url_for('worker_cash_page') }}">{{ t('cash.worker.nav.cash') }}</a>
+</nav><main class="w-body"><div class='w-table'><div class="card" style="padding:18px;overflow-x:auto"><h3>{{ t('employee.archive_title') }}</h3><table><thead><tr><th>{{ t('common.date') }}</th><th>{{ t('common.customer') }}</th><th>{{ t('common.product') }}</th><th>{{ t('common.amount') }}</th><th>{{ t('employee.initial_payment') }}</th><th>{{ t('employee.followup_payment') }}</th><th>{{ t('debts.remaining') }}</th><th>{{ t('employee.debt_section') }}</th></tr></thead><tbody>{% for r in rows %}{% set remain = r.financial_balance %}{% set method_key = payment_method_keys.get(r.payment_method) %}<tr><td>{{ r.date|business_date }}</td><td>{{ r.customer }}</td><td>{{ r.product }}</td><td>{{ '{:,.0f}'.format(r.qty_kg*r.price_per_kg) }}</td><td>{{ '{:,.0f}'.format(r.paid) }} ({{ t(method_key) if method_key else payment_methods.get(r.payment_method, t('common.cash')) }})</td><td>{{ '{:,.0f}'.format(r.receipts) }}</td><td>{{ t('employee.cancelled') if r.cancelled else '{:,.0f}'.format(remain) }}{% if not r.cancelled and r.legacy_estimated_amount %}<br><small>{{ '{:,.0f}'.format(r.legacy_estimated_amount) }} {{ t('employee.legacy_fifo') }}</small>{% endif %}</td><td><a href="{{ url_for('worker_debts') }}">{{ t('employee.debt_section') }}</a></td></tr>{% else %}<tr><td colspan="8">{{ t('employee.no_sales') }}</td></tr>{% endfor %}</tbody></table></div>
+</div>{{ render_pagination(rows_pagination) }}</main></div>{% endblock %}

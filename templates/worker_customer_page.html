@@ -1,0 +1,90 @@
+{% extends 'base.html' %}{% block content %}
+<style>
+:root{--wgreen:#076d51}
+.w-shell{max-width:1320px;margin:20px auto;padding:0 14px;color:#183d35;font-family:system-ui,sans-serif}
+.w-hero{padding:24px 28px;background:linear-gradient(120deg,#0b614b,#138468);border-radius:20px;color:white;margin-bottom:18px}
+.w-hero h1{margin:0;font-size:27px;color:#fff!important}.w-hero p{margin:8px 0 0;opacity:1;color:#ecfff8!important}
+.w-menu{display:flex;flex-wrap:wrap;gap:9px;margin:0 0 22px}
+.w-menu a{padding:11px 15px;background:white;border:1px solid #dce8e2;border-radius:12px;text-decoration:none;color:#165b47;font-weight:650}
+.w-menu a:hover{background:#e7f6ee}
+.w-body{background:white;border:1px solid #e0e9e4;border-radius:17px;padding:22px;box-shadow:0 8px 22px #173e3010}
+.w-body .card{box-shadow:none;border:0;padding:0!important}
+.w-body input,.w-body select{max-width:100%;box-sizing:border-box}
+.w-table{overflow-x:auto}.w-table table{min-width:780px}
+.w-tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}
+.w-tile{border-radius:16px;padding:22px;background:#e8f6ef}.w-tile:nth-child(2){background:#ecf2fe}.w-tile:nth-child(3){background:#fff3df}
+.w-tile strong{font-size:27px;display:block;margin-top:10px}
+@media(max-width:700px){.w-tiles{grid-template-columns:1fr}.w-hero{padding:18px}}
+</style><div class="w-shell"><div class="w-hero"><h1>{{ role_name }} — {{ t('employee.personal_account') }}</h1><p>TO‘RTKO‘L DON MAHSULOTI · {{ t('cash.worker.panel') }}</p></div>
+<nav class="w-menu">
+<a href="{{ url_for('worker_sales') }}">{{ t('cash.worker.nav.home') }}</a>
+<a href="{{ url_for('worker_sale_form') }}">{{ t('cash.worker.nav.new_sale') }}</a>
+<a href="{{ url_for('worker_debts') }}">{{ t('cash.worker.nav.debt_payment') }}</a>
+<a href="{{ url_for('worker_archive') }}">{{ t('cash.worker.nav.archive') }}</a>
+<a href="{{ url_for('worker_customers_page') }}">{{ t('cash.worker.nav.customers') }}</a>
+<a href="{{ url_for('worker_cash_page') }}">{{ t('cash.worker.nav.cash') }}</a>
+</nav><main class="w-body"><div class="card" style="padding:18px"><h3>{{ t('employee.customer_edit_title') }}</h3>
+<p>{{ t('employee.customer_edit_help') }}</p>
+<div><input id="edit-customer-search" autocomplete="off" placeholder="{{ t('employee.customer_search_placeholder') }}" style="width:100%;max-width:480px"><div id="edit-customer-results" style="display:none;border:1px solid #ccc;padding:8px;margin:6px 0;max-width:480px"></div></div>
+<form method="post" action="{{ url_for('worker_customer_edit') }}" id="customer-edit-form">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="customer_id" id="edit-customer-id" required>
+<input name="customer" id="edit-customer-name" required placeholder="{{ t('employee.customer_name_placeholder') }}">
+<input name="customer_phone" id="edit-customer-phone" required placeholder="{{ t('employee.phone_placeholder') }}">
+<button type="submit" id="edit-customer-submit" disabled>{{ t('employee.update_customer') }}</button></form></div>
+<script>
+(function(){
+ const ui={notFoundNew:{{ t('employee.customer_not_found_new')|tojson }},notFound:{{ t('employee.customer_not_found')|tojson }},searchFailed:{{ t('employee.search_failed')|tojson }},searchError:{{ t('employee.search_error')|tojson }},selectFirst:{{ t('employee.select_customer_first')|tojson }}};
+ const name=document.getElementById('customer-name'),phone=document.getElementById('customer-phone'),id=document.getElementById('customer-id'),box=document.getElementById('customer-results');
+ let timer,sequence=0;
+ function reset(){id.value='';}
+ function search(value){
+  clearTimeout(timer);const seq=++sequence;
+  if(value.trim().length<2){box.style.display='none';return;}
+  timer=setTimeout(async()=>{
+   try {const res=await fetch({{ url_for('worker_customer_search')|tojson }}+'?q='+encodeURIComponent(value));
+   const data=await res.json();if(seq!==sequence)return;
+   box.replaceChildren();
+   if(!data.customers.length){box.textContent=ui.notFoundNew;}
+   data.customers.forEach(c=>{const btn=document.createElement('button');btn.type='button';btn.textContent=c.name+' — '+c.phone;
+    btn.style.display='block';btn.style.margin='4px';btn.onclick=()=>{++sequence;name.value=c.name;phone.value=c.phone;id.value=c.id;box.style.display='none';};box.appendChild(btn)});
+   box.style.display='block';
+   }catch(e){box.style.display='none';}
+  },220);
+ }
+ if(name) name.addEventListener('input',()=>{reset();search(name.value)});
+ if(phone) phone.addEventListener('input',()=>{reset();search(phone.value)});
+ const editSearch=document.getElementById('edit-customer-search');
+ const editBox=document.getElementById('edit-customer-results');
+ const editId=document.getElementById('edit-customer-id');
+ const editName=document.getElementById('edit-customer-name');
+ const editPhone=document.getElementById('edit-customer-phone');
+ const editSubmit=document.getElementById('edit-customer-submit');
+ let editTimer,editSequence=0;
+ editSearch.addEventListener('input',()=>{
+  editId.value='';editName.value='';editPhone.value='';editSubmit.disabled=true;
+  clearTimeout(editTimer);const seq=++editSequence;const value=editSearch.value.trim();
+  if(value.length<2){editBox.style.display='none';return;}
+  editTimer=setTimeout(async()=>{
+   try {
+    const res=await fetch({{ url_for('worker_customer_search')|tojson }}+'?q='+encodeURIComponent(value));
+    if(!res.ok)throw new Error(ui.searchFailed);
+    const data=await res.json();if(seq!==editSequence)return;
+    editBox.replaceChildren();
+    if(!data.customers.length)editBox.textContent=ui.notFound;
+    data.customers.forEach(c=>{
+     const btn=document.createElement('button');btn.type='button';btn.textContent=c.name+' — '+c.phone;
+     btn.style.display='block';btn.style.margin='4px';
+     btn.onclick=()=>{++editSequence;editSearch.value=c.name+' — '+c.phone;editId.value=c.id;editName.value=c.name;editPhone.value=c.phone;editSubmit.disabled=false;editBox.style.display='none';};
+     editBox.appendChild(btn);
+    });
+    editBox.style.display='block';
+   }catch(e){editBox.textContent=ui.searchError;editBox.style.display='block';}
+  },220);
+ });
+ document.getElementById('customer-edit-form').addEventListener('submit',e=>{
+  if(!editId.value.trim()){e.preventDefault();alert(ui.selectFirst);}
+ });
+})();
+</script>
+</main></div>{% endblock %}

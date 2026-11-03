@@ -1,0 +1,125 @@
+{% extends 'base.html' %}{% from '_pagination.html' import render_pagination with context %}
+{% block content %}
+<main class="cashflow-test" style="max-width:1440px;margin:20px auto;padding:0 16px">
+  <header class="panel">
+    <h1>Sotuv va pul aylanmasi — sinov hisoboti</h1>
+    <p>Davr operatsiyalari va yakuniy kassa ko‘rsatkichlari alohida hisoblanadi. Yakuniy qoldiqlar tasdiqlangan fizik pul emas.</p>
+    <form method="get" style="display:flex;flex-wrap:wrap;gap:12px;align-items:end">
+      <label>Boshlanish sanasi<input type="date" name="start" value="{{ report.period.start }}"></label>
+      <label>Tugash sanasi<input type="date" name="end" value="{{ report.period.end }}" required></label>
+      <button type="submit">Hisobotni ko‘rsatish</button>
+    </form>
+  </header>
+
+  <section class="panel">
+    <h2>Asosiy ko‘rsatkichlar</h2>
+    <p>Tanlangan davr sotuvlari: <b>{{ '{:,.0f}'.format(report.sales.period_amount) }} so‘m</b> ·
+      {{ '{:,.2f}'.format(report.sales.period_kg) }} kg</p>
+    <p>Davrda qayd etilgan tushum, legacy bilan: <b>{{ '{:,.0f}'.format(report.cash.period_total_cash_including_legacy) }} so‘m</b></p>
+    <p>Davr xarajatlari: <b>{{ '{:,.0f}'.format(report.cash.period_expenses) }} so‘m</b> ·
+      Hisobiy pul oqimi: <b>{{ '{:,.0f}'.format(report.cash.period_net_change) }} so‘m</b></p>
+    <p>Joriy qarz snapshoti: <b>{{ '{:,.0f}'.format(report.debt.snapshot_total) }} so‘m</b>
+      (xodimlarga ajratilmagan: {{ '{:,.0f}'.format(report.debt.unassigned) }} so‘m)</p>
+    <p><b>{{ report.cash.balance_label }} korxona pul qoldig‘i: {{ '{:,.0f}'.format(report.cash.company_balance) }} so‘m</b></p>
+    <p>Hisoblash davri: {{ report.period.start_label }} — {{ report.period.end }}.
+      Boshlang‘ich balans tasdiqlanmagan; hisob nol boshlang‘ich mezonida va barcha mavjud yozuvlar asosida chiqarildi.</p>
+  </section>
+
+  <section class="panel" style="overflow-x:auto">
+    <h2>Xodimlar va Buxgalter bo‘yicha solishtirish</h2>
+    <table style="min-width:1200px;width:100%;border-collapse:collapse">
+      <thead><tr>
+        <th>Hisob egasi</th><th>Sotuv kg</th><th>Sotuv summasi</th>
+        <th>Boshlang‘ich to‘lov</th><th>Keyingi qarz to‘lovi</th>
+        <th>Qolgan qarz</th><th>Legacy FIFO taxmini</th><th>Xarajat</th>
+        <th>Topshirildi</th><th>Qabul qilindi</th>
+        <th>Naqd qoldiq</th><th>Plastik qoldiq</th><th>Bank qoldiq</th>
+        <th>Aniqlanmagan kanal</th><th>Jami hisobiy qoldiq</th>
+      </tr></thead>
+      <tbody>
+      {% for role in ('umid','maxmud','buxgalter') %}
+        {% set a = report.accounts[role] %}
+        <tr>
+          <td>{{ a.name }}</td><td>{{ '{:,.2f}'.format(a.get('period_sales_kg', 0)) }}</td>
+          <td>{{ '{:,.0f}'.format(a.get('period_sales_amount', 0)) }}</td>
+          <td>{{ '{:,.0f}'.format(a.initial_paid) }}</td>
+          <td>{{ '{:,.0f}'.format(a.debt_receipts) }}</td>
+          <td>{{ '{:,.0f}'.format(a.debt) }}</td>
+          <td>{{ '{:,.0f}'.format(a.legacy_fifo_estimated) }}</td>
+          <td>{{ '{:,.0f}'.format(a.expenses) }}</td>
+          <td>{{ '{:,.0f}'.format(a.period_transfers_out) }}</td>
+          <td>{{ '{:,.0f}'.format(a.period_transfers_in) }}</td>
+          {% for channel in ('naqd','plastik','hisob','noma_lum') %}
+          <td>{{ '{:,.0f}'.format(a.closing_channels[channel]) }}</td>
+          {% endfor %}
+          <td>{{ '{:,.0f}'.format(a.closing_balance) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p>Qarz qoldig‘i — snapshotdagi joriy qarz; FIFO qismi tarixiy bog‘lanish isboti emas.
+      Sotilmagan mahsulot bu sahifada xodim qarzi hisoblanmaydi.</p>
+  </section>
+
+  <section class="panel">
+    <h2>Kassa va muvofiqlik</h2>
+    <p>Uchta belgilangan kassa yig‘indisi: {{ '{:,.0f}'.format(report.cash.allocated_balance) }} so‘m.</p>
+    <p>Noma’lum egali pul harakati suspense: {{ '{:,.0f}'.format(report.cash.suspense_balance) }} so‘m.</p>
+    <p>Umumiy hisobiy qoldiq: {{ '{:,.0f}'.format(report.cash.company_balance) }} so‘m.</p>
+    <p>Uch kassa jami umumiy qoldiqqa teng: {{ 'Ha' if report.cash.accounts_sum_matches_company else 'Yo‘q — noma’lum pul manbalari ajratilgan' }}.</p>
+    <p>Ichki topshirish — xodimdan chiqim {{ '{:,.0f}'.format(report.cash.transfer_out) }} so‘m;
+      Buxgalterga kirim {{ '{:,.0f}'.format(report.cash.transfer_in) }} so‘m;
+      tenglik: {{ 'Ha' if report.cash.transfers_reconcile else 'Yo‘q' }}.
+      Transfer umumiy tushum yoki xarajatga qo‘shilmaydi.</p>
+    <p>Sotuv/to‘lov/qarz muvofiqligi farqi:
+      {{ '{:,.2f}'.format(report.sales_reconciliation.difference) }} so‘m.</p>
+  </section>
+
+  <section class="panel" style="overflow-x:auto">
+    <h2>Tanlangan davrdagi operatsiyalar</h2>
+    <table style="min-width:1200px;width:100%;border-collapse:collapse">
+      <thead><tr>
+        <th>Sana</th><th>Operatsiya</th><th>Xodim / hisob</th><th>Qarshi tomon</th>
+        <th>Maqsad / mahsulot</th><th>Amalda qilgan shaxs</th><th>Toifa</th>
+        <th>Summa</th><th>Naqd ta’sir</th><th>To‘lov kanali</th>
+        <th>Pul manbai</th><th>Tizimga kiritgan</th><th>Manba</th><th>Izoh</th>
+      </tr></thead>
+      <tbody>
+      {% for e in report.events %}
+        <tr>
+          <td>{{ e.date }}</td><td>{{ e.type }}</td><td>{{ e.actor }}</td>
+          <td>{{ e.counterparty or '—' }}</td><td>{{ e.purpose or e.description }}</td>
+          <td>{{ e.actual_person }}</td><td>{{ e.category|default('—') }}</td>
+          <td>{{ '{:,.2f}'.format(e.amount) }}</td>
+          <td>{{ '{:,.2f}'.format(e.cash_delta) if e.cash_role else '—' }}</td>
+          <td>{{ e.channel }}</td><td>{{ e.fund_source|default('—') }}</td>
+          <td>{{ e.entered_by }}</td><td>{{ e.source }} #{{ e.source_id }}</td>
+          <td>{{ e.details }}</td>
+        </tr>
+      {% else %}
+        <tr><td colspan="14">Tanlangan davrda ko‘rsatiladigan operatsiya yo‘q.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {{ render_pagination(events_pagination) }}
+  </section>
+
+  <section class="panel">
+    <h2>Noaniqlik va nazorat ogohlantirishlari</h2>
+    <ul>
+      <li>Boshlang‘ich pul qoldig‘i tasdiqlanmagan — natijalar faqat hisobiy qoldiq.</li>
+      <li>Legacy payments qabul qiluvchisi/kanali aniqlanmagan bo‘lsa, noma’lum tarixiy tushum sifatida ajratiladi.</li>
+      <li>Legacy FIFO qarz taqsimoti hisobiy taxmin; tarixiy to‘lov bog‘lanishi isboti emas.</li>
+      <li>Bekor qilingan sotuv uchun alohida qaytarim yozuvi bo‘lmasa, pul qaytarildi deb olinmaydi.</li>
+      {% for warning in report.warnings %}
+      <li>{{ warning.message }}{% if warning.source %} ({{ warning.source }} #{{ warning.source_id }}){% endif %}
+        {% if warning.payment_id %}(payments #{{ warning.payment_id }}){% endif %}
+        {% if warning.sale_id %}(sotuv #{{ warning.sale_id }}){% endif %}
+        {% if warning.transfer_id %}(transfer #{{ warning.transfer_id }}){% endif %}
+        {% if warning.expense_id %}(xarajat #{{ warning.expense_id }}){% endif %}
+      </li>
+      {% endfor %}
+    </ul>
+  </section>
+</main>
+{% endblock %}

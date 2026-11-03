@@ -1,0 +1,61 @@
+{% extends 'base.html' %}
+{% from '_pagination.html' import render_pagination with context %}
+{% block content %}
+<h1>Xarajatlar</h1>
+<section class="panel">
+  <form method="post" class="form-grid">
+    <input type="hidden" name="operation_token" value="{{ accountant_expense_token() }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Sana<input type="date" name="date" max="2099-12-31"></label>
+    <label>Toifa
+      <select name="category">
+        <option>Elektr</option><option>Ish haqi</option><option>Ta’mirlash</option>
+        <option>Transport</option><option>Boshqa</option>
+      </select>
+    </label>
+    <label>Summa (so‘m)<input type="number" name="amount" min="0.01" step="0.01" required></label>
+    <label>To‘lov usuli
+      <select name="payment_method" required>
+        <option value="naqd">Naqd</option>
+        <option value="plastik">Plastik</option>
+        <option value="hisob">Bank</option>
+      </select>
+    </label>
+    <label>Pul manbai<input value="Buxgalter kassasi" readonly></label>
+    <label>Izoh<input name="note"></label>
+    <button>Saqlash</button>
+  </form>
+</section>
+<section class="panel">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+    <h2 style="margin:0">Xarajatlar tarixi</h2>
+    <a href="{{ url_for('excel_report', type='expenses') }}" style="display:inline-flex;align-items:center;padding:8px 12px;border-radius:9px;background:var(--green);color:#fff;text-decoration:none;font-size:13px;font-weight:700;white-space:nowrap">Excel yuklab olish</a>
+  </div>
+  <div style="overflow-x:auto">
+    <table style="min-width:1050px">
+      <thead>
+        <tr>
+          <th>Sana</th><th>Tizimga kiritgan shaxs</th><th>Toifa</th><th>Summa (so‘m)</th>
+          <th>To‘lov kanali</th><th>Pul manbai</th><th>Izoh</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+        <tr>
+          <td>{{ r.date|business_date }}</td>
+          <td>{{ r.entered_by_display }}</td>
+          <td>{{ r.category }}</td>
+          <td>{{ '{:,.2f}'.format(r.amount) }}</td>
+          <td>{{ r.payment_method_display }}</td>
+          <td>{{ r.fund_source_display }}</td>
+          <td>{{ r.note or '—' }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7">Xarajatlar yo‘q.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {{ render_pagination(pagination) }}
+</section>
+{% endblock %}

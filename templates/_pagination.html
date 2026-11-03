@@ -1,0 +1,60 @@
+{% macro render_pagination(pagination) %}
+{% if pagination %}
+<div class="pagination-bar">
+  <form class="pagination-size" method="get" action="{{ request.path }}">
+    {% for key, values in request.args.lists() %}
+      {% if key not in (pagination.page_param, pagination.per_page_param) %}
+        {% for value in values %}<input type="hidden" name="{{ key }}" value="{{ value }}">{% endfor %}
+      {% endif %}
+    {% endfor %}
+    <label>
+      <select name="{{ pagination.per_page_param }}" onchange="this.form.submit()">
+        {% for size in (20, 50, 100) %}
+        <option value="{{ size }}" {% if pagination.per_page == size %}selected{% endif %}>{{ size }} {{ t('pagination.per_page') }}</option>
+        {% endfor %}
+      </select>
+    </label>
+  </form>
+  <div class="pagination-summary" aria-live="polite">
+    {% if pagination.total %}
+      {{ pagination.start }} {{ t('pagination.from') }} {{ pagination.end }} {{ t('pagination.to') }} {{ t('pagination.showing') }}.
+      {{ t('pagination.total') }} {{ pagination.total }} {{ t('pagination.records') }}
+    {% else %}
+      {{ t('pagination.total') }} 0 {{ t('pagination.records') }}
+    {% endif %}
+  </div>
+  {% if pagination.pages > 1 %}
+  <nav class="pagination-links" aria-label="{{ t('pagination.navigation') }}">
+    {% if pagination.page > 1 %}
+    <a href="{{ pagination_url(pagination.page - 1, pagination) }}" aria-label="{{ t('pagination.previous') }}">‹</a>
+    {% else %}
+    <span class="disabled" aria-disabled="true" aria-label="{{ t('pagination.previous') }}">‹</span>
+    {% endif %}
+    {% for page in pagination.window %}
+      {% if page is none %}
+      <span class="pagination-ellipsis" aria-hidden="true">…</span>
+      {% elif page == pagination.page %}
+      <span class="current" aria-current="page">{{ page }}</span>
+      {% else %}
+      <a href="{{ pagination_url(page, pagination) }}">{{ page }}</a>
+      {% endif %}
+    {% endfor %}
+    {% if pagination.page < pagination.pages %}
+    <a href="{{ pagination_url(pagination.page + 1, pagination) }}" aria-label="{{ t('pagination.next') }}">›</a>
+    {% else %}
+    <span class="disabled" aria-disabled="true" aria-label="{{ t('pagination.next') }}">›</span>
+    {% endif %}
+  </nav>
+  {% endif %}
+</div>
+<style>
+.pagination-bar{display:grid;grid-template-columns:minmax(150px,1fr) minmax(180px,2fr) minmax(180px,2fr);align-items:center;gap:12px;margin-top:12px;padding:9px 0;color:#52665e;font-size:13px}
+.pagination-size{margin:0}.pagination-size select{width:auto;min-width:132px;padding:7px 9px;border:1px solid #d4e0d9;border-radius:7px;background:#fff;color:#25483d}
+.pagination-summary{text-align:center}.pagination-links{display:flex;justify-content:flex-end;align-items:center;gap:4px;flex-wrap:wrap}
+.pagination-links a,.pagination-links span{display:inline-flex;min-width:30px;height:30px;align-items:center;justify-content:center;padding:0 7px;border:1px solid #d7e3dc;border-radius:7px;background:#fff;color:#176b51;text-decoration:none}
+.pagination-links a:hover{background:#edf7f1;border-color:#9fcbb4}.pagination-links .current{background:#176b51;border-color:#176b51;color:#fff;font-weight:700}
+.pagination-links .disabled{color:#a7b3ad;background:#f6f8f6}.pagination-links .pagination-ellipsis{border-color:transparent;background:transparent;min-width:18px;padding:0}
+@media(max-width:760px){.pagination-bar{grid-template-columns:1fr;justify-items:center;gap:8px}.pagination-summary{text-align:center}.pagination-links{justify-content:center}}
+</style>
+{% endif %}
+{% endmacro %}

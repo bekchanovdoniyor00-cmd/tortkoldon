@@ -1,0 +1,1736 @@
+:root{--green:#174c38;--green2:#24684c;--cream:#f7f4e9;--gold:#d7ad48;--ink:#20332a;--muted:#718078;--line:#e1e7df}*{box-sizing:border-box}body{margin:0;background:var(--cream);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Arial,sans-serif}header{background:var(--green);color:white;padding:17px max(20px,calc((100% - 1180px)/2));display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}.brand{font-weight:800;letter-spacing:.3px}header a{color:#fff}nav{display:flex;gap:8px;flex-wrap:wrap;padding:12px max(20px,calc((100% - 1180px)/2));background:#e9eee6;border-bottom:1px solid var(--line)}nav a{color:var(--green);text-decoration:none;font-weight:650;padding:8px 11px;border-radius:8px}nav a:hover{background:#dce6dc}main{max-width:1180px;margin:28px auto;padding:0 20px;min-height:70vh}h1{margin:0 0 6px;font-size:28px;color:var(--green)}h2{font-size:18px;margin:0 0 14px;color:var(--green)}p{color:var(--muted)}.page-title{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:20px}.pill{background:#f2e5bb;color:#6c5012;border-radius:30px;padding:6px 12px;font-size:12px;font-weight:700}.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.metric,.panel,.auth{background:white;border:1px solid var(--line);border-radius:15px;padding:18px;box-shadow:0 3px 12px #193b2410}.metric{border-top:4px solid var(--gold)}.metric span{display:block;color:var(--muted);font-size:13px;margin-bottom:8px}.metric strong{font-size:21px;color:var(--green);overflow-wrap:anywhere}.quick{display:flex;gap:10px;flex-wrap:wrap;margin:18px 0}.quick a,button{display:inline-block;border:0;border-radius:9px;padding:11px 15px;background:var(--green);color:white;text-decoration:none;font-weight:700;cursor:pointer}.quick a:hover,button:hover{background:var(--green2)}.columns{display:grid;grid-template-columns:1fr 1fr;gap:16px}.panel{margin-bottom:16px;overflow:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{text-align:left;padding:10px 9px;border-bottom:1px solid var(--line);white-space:nowrap}th{background:#f3f6f0;color:var(--green)}.form-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.form-grid label,.auth label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:650;color:var(--green)}input,select{width:100%;border:1px solid #cbd7cb;border-radius:8px;padding:11px;background:#fff;color:var(--ink);font:inherit}.wide{grid-column:1/-1}.form-grid button{justify-self:start}.auth{max-width:440px;margin:50px auto}.auth form{display:grid;gap:15px}.auth button{width:100%}.hint{font-size:13px}.flash{padding:12px 15px;border-radius:9px;margin-bottom:15px}.flash.success{background:#e3f4e7;color:#18562c}.flash.error{background:#fff0ed;color:#9b2c21}.logout{margin-left:12px}.footer,footer{text-align:center;color:var(--muted);font-size:12px;padding:24px 12px}@media(max-width:850px){.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.columns{grid-template-columns:1fr}main{margin:20px auto}}@media(max-width:520px){header{padding:14px 16px}nav{padding:8px;gap:2px}nav a{font-size:13px;padding:7px}.cards{grid-template-columns:1fr 1fr;gap:8px}.metric{padding:12px}.metric strong{font-size:16px}.metric span{font-size:12px}main{padding:0 12px}.form-grid{grid-template-columns:1fr}.wide{grid-column:auto}.page-title{align-items:flex-start;flex-direction:column}h1{font-size:24px}}
+/* 2026 yangi panel dizayni */
+:root{--green:#073d2e;--green2:#14543c;--cream:#f8f6ef;--gold:#d5aa48;--ink:#173b2f;--line:#e4e8df}body{background:var(--cream)}.sidebar{position:fixed;left:0;top:0;bottom:0;width:250px;background:linear-gradient(165deg,#064131,#052d25);color:white;z-index:30;display:flex;flex-direction:column;box-shadow:3px 0 16px #173c2b1c}.side-brand{padding:24px 15px 28px;display:flex;gap:10px;align-items:center;border-bottom:1px solid #ffffff1b}.brand-icon{font-size:33px}.side-brand strong{font-size:12px;line-height:1.35;display:block}.side-brand small{font-size:10px;display:block;opacity:.75}.side-nav{display:flex;flex-direction:column;background:none;border:0;padding:16px 12px;gap:5px;flex:1;overflow:auto}.side-nav a{display:flex;align-items:center;gap:13px;color:#edf8f1;padding:12px 13px;border-radius:9px;font-size:14px;font-weight:600;text-decoration:none}.side-nav a:hover,.side-nav a.active{background:#ffffff27;color:#fff}.side-nav a span{display:inline}.side-bottom{text-align:center;padding:22px 8px 30px;color:#e2bd6c;font-size:32px}.side-bottom span{font-size:12px;color:#f4eddb}.app-shell{margin-left:250px;min-height:100vh}.topbar{background:#fff;color:var(--ink);padding:17px 30px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--line);gap:12px}.topbar-left{display:flex;gap:20px;align-items:center;font-size:13px;font-weight:700}.top-date{font-weight:400;color:#75867c}.user-chip{font-size:13px;white-space:nowrap}.user-chip a{color:var(--green);margin-left:12px}.menu-toggle{display:none;background:var(--green);color:white;border:0;padding:7px 10px;border-radius:7px}.app-shell main{max-width:1450px;margin:0 auto;padding:26px 28px 45px}.app-shell footer{padding:16px 28px;color:#829087;font-size:12px;text-align:center}.page-title{margin-bottom:22px}.page-title h1{font-size:27px}.page-title p{color:#7c8a81}.cards.overview{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:18px}.cards.overview .metric{display:flex;align-items:center;gap:14px;border:1px solid #e8e8df;border-top:1px solid #e8e8df;padding:20px;min-height:112px;box-shadow:0 4px 16px #152e2310}.metric-icon{display:grid;place-items:center;background:#f7edd1;color:#825e15;width:52px;height:52px;min-width:52px;border-radius:50%;font-size:24px}.cards.overview .metric strong{font-size:22px;white-space:normal;line-height:1.3}.cards.overview .metric small{display:block;font-size:11px;color:#8a988f;margin-top:4px}.dashboard-grid{display:grid;grid-template-columns:1.3fr 1fr 1fr;gap:14px;margin:16px 0}.dashboard-grid .panel{min-width:0}.dashboard-grid h2,.columns h2{font-size:17px}.legend{font-size:12px;color:#75877c;display:flex;align-items:center;gap:8px}.legend i{width:9px;height:9px;display:inline-block;border-radius:3px}.leg-un,.bar.un{background:#17684c}.leg-bran,.bar.bran{background:#d4a94a}.bar-chart{height:190px;display:flex;align-items:stretch;justify-content:space-around;gap:9px;border-bottom:1px solid #dce4dc;margin-top:15px}.bar-day{display:flex;flex:1;flex-direction:column;justify-content:flex-end;align-items:center;min-width:0}.bar-pair{height:165px;display:flex;align-items:flex-end;justify-content:center;gap:4px;width:100%}.bar{width:32%;min-height:0;border-radius:4px 4px 0 0}.bar-day small{font-size:10px;color:#718078;padding-top:5px}.stock-row{display:flex;justify-content:space-between;gap:10px;font-size:13px;margin:12px 0 5px}.stock-row strong{white-space:nowrap}.stock-track{height:8px;background:#edf0e9;border-radius:10px;overflow:hidden}.stock-track span{display:block;height:100%;border-radius:10px;background:#17684c}.stock-track .flour{background:#d4a94a}.stock-track .bran{background:#8eaa7c}.stock-track .muchka{background:#78b3a5}.stock-track .telashka{background:#9c9cb1}.dashboard-grid .quick{display:flex;flex-direction:column;gap:8px;margin:0}.dashboard-grid .quick a{display:block;text-align:left}.table-scroll{overflow-x:auto}.panel{border:1px solid #e5e9e1;border-radius:14px;box-shadow:0 3px 12px #1633260b}table{width:100%}th{background:#f0f4ef}input,select{max-width:100%}
+@media(max-width:1200px){.dashboard-grid{grid-template-columns:1fr 1fr}.dashboard-grid .panel:last-child{grid-column:1/-1}.cards.overview{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:800px){.sidebar{transform:translateX(-100%);transition:transform .2s}.menu-open .sidebar{transform:translateX(0)}.app-shell{margin-left:0}.menu-toggle{display:inline-block}.topbar{padding:13px 16px}.top-date{display:none}.app-shell main{padding:18px 14px}.cards.overview{grid-template-columns:repeat(2,minmax(0,1fr))}.dashboard-grid{grid-template-columns:1fr}.dashboard-grid .panel:last-child{grid-column:auto}.columns{grid-template-columns:1fr}.cards.overview .metric{padding:12px;gap:9px}.cards.overview .metric strong{font-size:17px}.metric-icon{width:36px;height:36px;min-width:36px;font-size:18px}.user-chip{font-size:11px}}@media(max-width:430px){.cards.overview{grid-template-columns:1fr}.topbar-left>span:first-of-type{font-size:11px}.page-title h1{font-size:23px}}
+
+/* Korxona uslubi */
+body{background-image:linear-gradient(rgba(245,250,245,.92),rgba(245,250,245,.94)),url('wheat_bg.jpg');background-size:cover;background-attachment:fixed;background-position:center}
+.brand::before{content:'';display:inline-block;width:46px;height:46px;background:url('logo.png') center/contain no-repeat;vertical-align:middle;margin-right:10px;border-radius:50%}
+.table-wrap{overflow-x:auto}
+
+/* Korxona logotipi: chap menyuning pastki qismi */
+.side-bottom-logo{display:block;width:120px;height:120px;object-fit:contain;margin:0 auto 12px;border-radius:50%;}
+
+
+/* Chap menyu: elementlar ikki ustunga o'tib ketmasin */
+.sidebar .side-nav {
+    display: flex;
+    flex-direction: column;
+    flex-wrap: nowrap;
+    overflow-y: auto;
+    overflow-x: hidden;
+    min-height: 0;
+    width: 100%;
+}
+/* Stitch-inspired visual refinements; layout and control colors remain unchanged. */
+:root {
+    --cream: #f8fafc;
+    --ink: #0f172a;
+    --muted: #64748b;
+    --line: #e2e8f0;
+}
+
+body {
+    background-color: #f8fafc;
+    background-image: none;
+    color: #0f172a;
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+}
+
+h1,
+h2 {
+    color: #0f172a;
+    font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+    letter-spacing: -.015em;
+}
+
+p {
+    color: #64748b;
+}
+
+.sidebar {
+    background: #061e17;
+    box-shadow: 3px 0 16px rgba(15, 23, 42, .08);
+}
+
+.side-nav a:hover,
+.side-nav a.active {
+    background: rgba(16, 185, 129, .15);
+    color: #a7f3d0;
+}
+
+.topbar {
+    background: #fff;
+    border-bottom-color: #e2e8f0;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+}
+
+.user-chip a {
+    color: #047857;
+}
+
+.metric,
+.cards.overview .metric,
+.panel,
+.auth {
+    background: #fff;
+    border-color: #e2e8f0;
+    border-radius: 8px;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 1px 1px rgba(15, 23, 42, .02);
+}
+
+.metric-icon {
+    background: #d1fae5;
+    color: #047857;
+}
+
+.metric span {
+    color: #64748b;
+}
+
+.metric strong {
+    color: #0f172a;
+    font-variant-numeric: tabular-nums;
+}
+
+.leg-un,
+.bar.un,
+.stock-track span {
+    background: #059669;
+}
+
+.leg-bran,
+.bar.bran {
+    background: #34d399;
+}
+
+.stock-track .flour {
+    background: #10b981;
+}
+
+.stock-track .bran {
+    background: #6ee7b7;
+}
+
+.bar-chart {
+    border-bottom-color: #e2e8f0;
+}
+
+.stock-track {
+    background: #e2e8f0;
+}
+
+th {
+    background: #f1f5f9;
+    color: #334155;
+}
+
+th,
+td {
+    border-bottom-color: #f1f5f9;
+}
+
+input,
+select {
+    border-color: #cbd5e1;
+    border-radius: 4px;
+    background: #fff;
+    color: #0f172a;
+}
+
+input:focus,
+select:focus {
+    border-color: #059669;
+    box-shadow: 0 0 0 3px rgba(5, 150, 105, .15);
+    outline: none;
+}
+
+/* Dashboard KPI cards only */
+.cards.overview.dashboard-inventory {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.cards.overview.dashboard-finance {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.cards.overview.dashboard-card-grid .metric {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto 1fr;
+    align-items: start;
+    gap: 12px;
+    padding: 16px;
+    background: linear-gradient(145deg, #fff 65%, var(--card-tint));
+    border: 1px solid var(--card-border);
+    border-radius: 14px;
+    box-shadow: inset 3px 0 0 var(--card-accent), 0 1px 2px rgba(15, 23, 42, .04), 0 1px 1px rgba(15, 23, 42, .02);
+    transition: border-color .2s ease, box-shadow .2s ease;
+}
+
+.cards.overview.dashboard-card-grid .metric:hover {
+    border-color: var(--card-accent-border);
+    box-shadow: inset 3px 0 0 var(--card-accent), 0 4px 8px -2px rgba(15, 23, 42, .08), 0 2px 4px -2px rgba(15, 23, 42, .04);
+}
+
+.cards.overview.dashboard-card-grid .metric > .metric-icon {
+    display: grid;
+    grid-column: 2;
+    grid-row: 1;
+    place-items: center;
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    margin: 0;
+    border: 1px solid var(--card-accent-border);
+    border-radius: 11px;
+    background: var(--card-tint);
+    color: var(--card-accent);
+    font-size: 16px;
+}
+
+.cards.overview.dashboard-card-grid .metric > div {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    min-width: 0;
+}
+
+.cards.overview.dashboard-card-grid .metric > div > span {
+    margin-bottom: 6px;
+    color: var(--card-title);
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    text-transform: uppercase;
+}
+
+.cards.overview.dashboard-card-grid .metric strong {
+    color: var(--card-value);
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+    font-size: 20px;
+    font-weight: 750;
+    line-height: 1.3;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+
+.cards.overview.dashboard-card-grid .metric small {
+    display: block;
+    margin-top: 6px;
+    color: var(--card-note);
+    font-size: 11px;
+    line-height: 1.4;
+    background-image: linear-gradient(var(--card-divider), var(--card-divider));
+    background-position: top;
+    background-repeat: no-repeat;
+    background-size: 100% 1px;
+}
+
+.cards.overview.dashboard-inventory .metric:nth-child(1) {
+    --card-accent: #d97706;
+    --card-accent-border: #fcd34d;
+    --card-border: #f1dfb8;
+    --card-tint: #fffbeb;
+    --card-title: #92400e;
+    --card-value: #78350f;
+    --card-note: #a16207;
+    --card-divider: #f3e8c8;
+}
+
+.cards.overview.dashboard-inventory .metric:nth-child(2),
+.cards.overview.dashboard-finance .metric:nth-child(1),
+.cards.overview.dashboard-finance .metric:nth-child(2) {
+    --card-accent: #059669;
+    --card-accent-border: #6ee7b7;
+    --card-border: #ccebdd;
+    --card-tint: #ecfdf5;
+    --card-title: #047857;
+    --card-value: #065f46;
+    --card-note: #64748b;
+    --card-divider: #d1fae5;
+}
+
+.cards.overview.dashboard-inventory .metric:nth-child(3) {
+    --card-accent: #0284c7;
+    --card-accent-border: #7dd3fc;
+    --card-border: #d3eaf5;
+    --card-tint: #f0f9ff;
+    --card-title: #0369a1;
+    --card-value: #075985;
+    --card-note: #64748b;
+    --card-divider: #e0f2fe;
+}
+
+.cards.overview.dashboard-inventory .metric:nth-child(4) {
+    --card-accent: #6366f1;
+    --card-accent-border: #c7d2fe;
+    --card-border: #e0e7ff;
+    --card-tint: #eef2ff;
+    --card-title: #4f46e5;
+    --card-value: #3730a3;
+    --card-note: #64748b;
+    --card-divider: #e0e7ff;
+}
+
+.cards.overview.dashboard-inventory .metric:nth-child(5),
+.cards.overview.dashboard-finance .metric:nth-child(3) {
+    --card-accent: #e11d48;
+    --card-accent-border: #fda4af;
+    --card-border: #f3d6dc;
+    --card-tint: #fff1f2;
+    --card-title: #be123c;
+    --card-value: #9f1239;
+    --card-note: #64748b;
+    --card-divider: #ffe4e6;
+}
+
+.cards.overview.dashboard-finance .metric:nth-child(4) {
+    --card-accent: #d97706;
+    --card-accent-border: #fcd34d;
+    --card-border: #f1dfb8;
+    --card-tint: #fffbeb;
+    --card-title: #92400e;
+    --card-value: #78350f;
+    --card-note: #a16207;
+    --card-divider: #f3e8c8;
+}
+
+@media (max-width: 1100px) {
+    .cards.overview.dashboard-inventory {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .cards.overview.dashboard-finance {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .cards.overview.dashboard-inventory,
+    .cards.overview.dashboard-finance {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+/* Dashboard financial explanation and conditional warning panels only */
+.dashboard-audit-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    gap: 20px;
+    align-items: stretch;
+    margin: 20px 0;
+}
+
+.dashboard-audit-grid > .panel {
+    min-width: 0;
+    margin-bottom: 0;
+    padding: 24px;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 1px 1px rgba(15, 23, 42, .02);
+}
+
+.dashboard-audit-grid > .dashboard-financial-explanation h2,
+.dashboard-audit-grid > .dashboard-financial-warnings h2 {
+    padding-bottom: 12px;
+    border-bottom: 1px solid #e2e8f0;
+    color: #0f172a;
+    font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+    font-size: 16px;
+    letter-spacing: -.01em;
+}
+
+.dashboard-audit-grid > .dashboard-financial-explanation p,
+.dashboard-audit-grid > .dashboard-financial-warnings p,
+.dashboard-audit-grid > .dashboard-financial-warnings li {
+    color: #475569;
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+.dashboard-audit-grid > .dashboard-financial-explanation .dashboard-payment-breakdown {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    margin: 16px 0;
+}
+
+.dashboard-audit-grid > .dashboard-financial-explanation .dashboard-payment-card {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #f8fafc;
+}
+
+.dashboard-audit-grid > .dashboard-financial-explanation .dashboard-payment-card span {
+    display: block;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .04em;
+    line-height: 1.4;
+    text-transform: uppercase;
+}
+
+.dashboard-audit-grid > .dashboard-financial-explanation .dashboard-payment-card strong {
+    display: block;
+    margin-top: 6px;
+    color: #0f172a;
+    font-size: 15px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.dashboard-audit-grid > .dashboard-financial-warnings {
+    position: relative;
+    overflow: hidden;
+    border-color: #f5d477;
+    border-radius: 16px;
+    background: linear-gradient(145deg, #fffdf6, #fff 88%);
+    box-shadow: 0 1px 2px rgba(120, 83, 10, .04), 0 6px 16px rgba(120, 83, 10, .05);
+}
+
+.dashboard-audit-grid > .dashboard-financial-warnings h2 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-bottom-color: #f4e3b2;
+}
+
+.dashboard-audit-grid > .dashboard-financial-warnings .dashboard-warning-icon {
+    display: inline-grid;
+    flex: 0 0 auto;
+    place-items: center;
+    width: 30px;
+    height: 30px;
+    border: 1px solid #f5cf68;
+    border-radius: 10px;
+    background: #fef3c7;
+    box-shadow: 0 1px 2px rgba(120, 83, 10, .08);
+    color: #b45309;
+    font-size: 15px;
+    font-weight: 800;
+}
+
+.dashboard-audit-grid > .dashboard-financial-warnings .dashboard-warning-list {
+    margin: 0;
+    padding: 14px 16px 14px 34px;
+    border: 1px solid #f5df9f;
+    border-radius: 12px;
+    background: #fffbeb;
+}
+
+.dashboard-audit-grid > .dashboard-financial-warnings .dashboard-warning-list li {
+    padding-left: 3px;
+}
+
+.dashboard-audit-grid > .dashboard-financial-warnings .dashboard-warning-list li::marker {
+    color: #d97706;
+}
+
+.dashboard-audit-grid > .dashboard-financial-warnings > p {
+    color: #64748b;
+}
+
+@media (max-width: 800px) {
+    .dashboard-audit-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .dashboard-audit-grid > .dashboard-financial-explanation .dashboard-payment-breakdown {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .dashboard-audit-grid > .panel {
+        padding: 18px;
+    }
+}
+
+/* Dashboard sales chart and quick actions only */
+.dashboard-grid.dashboard-chart-actions-grid {
+    grid-template-columns: minmax(0, 7fr) minmax(0, 5fr);
+    align-items: stretch;
+}
+
+.dashboard-chart-actions-grid > .panel {
+    min-width: 0;
+    margin-bottom: 0;
+}
+
+.dashboard-grid.dashboard-chart-actions-grid > .panel:last-child {
+    grid-column: auto;
+}
+
+.dashboard-sales-table-wrap {
+    max-width: 100%;
+    margin-top: 14px;
+    overflow-x: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #fff;
+    -webkit-overflow-scrolling: touch;
+}
+
+.dashboard-sales-table {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: separate;
+    border-spacing: 0;
+    color: #334155;
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+    font-size: 11px;
+}
+
+.dashboard-sales-table th,
+.dashboard-sales-table td {
+    padding: 9px 8px;
+    border-bottom: 1px solid #e8edf3;
+    white-space: nowrap;
+}
+
+.dashboard-sales-table thead th {
+    background: #f8fafc;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .035em;
+    text-align: right;
+}
+
+.dashboard-sales-table thead th:first-child,
+.dashboard-sales-table tbody th,
+.dashboard-sales-table tfoot th {
+    text-align: left;
+}
+
+.dashboard-sales-table tbody th {
+    background: #fff;
+    color: #334155;
+    font-weight: 650;
+}
+
+.dashboard-sales-table tbody td {
+    color: #475569;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+}
+
+.dashboard-sales-table .dashboard-sales-col-un {
+    background-color: #f0fdf4;
+}
+
+.dashboard-sales-table .dashboard-sales-col-qora-un {
+    background-color: #f5f3ff;
+}
+
+.dashboard-sales-table .dashboard-sales-col-kepak {
+    background-color: #fffbeb;
+}
+
+.dashboard-sales-table .dashboard-sales-col-muchka {
+    background-color: #f0f9ff;
+}
+
+.dashboard-sales-table .dashboard-sales-col-telashka {
+    background-color: #fff7ed;
+}
+
+.dashboard-sales-table thead .dashboard-sales-col-un {
+    color: #047857;
+}
+
+.dashboard-sales-table thead .dashboard-sales-col-qora-un {
+    color: #6d28d9;
+}
+
+.dashboard-sales-table thead .dashboard-sales-col-kepak {
+    color: #a16207;
+}
+
+.dashboard-sales-table thead .dashboard-sales-col-muchka {
+    color: #0369a1;
+}
+
+.dashboard-sales-table thead .dashboard-sales-col-telashka {
+    color: #c2410c;
+}
+
+.dashboard-sales-table .dashboard-sales-col-total {
+    color: #0f172a;
+    font-weight: 700;
+}
+
+.dashboard-sales-table tfoot th,
+.dashboard-sales-table tfoot td {
+    border-top: 2px solid #cbd5e1;
+    border-bottom: 0;
+    background-color: #f1f5f9;
+    color: #0f172a;
+    font-weight: 800;
+}
+
+.dashboard-chart-actions-grid .dashboard-quick-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+    margin: 16px 0 0;
+}
+
+.dashboard-chart-actions-grid .dashboard-quick-actions a {
+    display: flex;
+    min-width: 0;
+    min-height: 72px;
+    align-items: center;
+    padding: 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04);
+    color: #334155;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.4;
+    text-align: left;
+    transition: border-color .2s ease, background-color .2s ease, box-shadow .2s ease;
+}
+
+.dashboard-chart-actions-grid .dashboard-quick-actions a:hover {
+    border-color: #a7f3d0;
+    background: #f0fdf4;
+    box-shadow: 0 3px 8px rgba(15, 23, 42, .06);
+    color: #047857;
+}
+
+@media (max-width: 800px) {
+    .dashboard-grid.dashboard-chart-actions-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .dashboard-sales-table {
+        min-width: 760px;
+    }
+}
+
+/* Stitch-inspired sidebar and topbar finishes; geometry stays unchanged. */
+.sidebar {
+    background: linear-gradient(180deg, #061e17 0%, #05251c 100%);
+    box-shadow: 3px 0 18px rgba(6, 30, 23, .18);
+}
+
+.side-brand {
+    border-bottom-color: rgba(148, 163, 184, .14);
+}
+
+.side-brand .brand-icon {
+    color: #34d399;
+    filter: drop-shadow(0 1px 3px rgba(52, 211, 153, .2));
+}
+
+.side-brand strong {
+    color: #f8fafc;
+    font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+    letter-spacing: -.01em;
+}
+
+.side-brand small {
+    color: #6ee7b7;
+    opacity: .9;
+}
+
+.side-nav a {
+    color: #cbd5d1;
+    transition: background-color .18s ease, color .18s ease, box-shadow .18s ease;
+}
+
+.side-nav a:hover {
+    background: rgba(16, 185, 129, .1);
+    color: #ecfdf5;
+}
+
+.side-nav a.active {
+    background: rgba(16, 185, 129, .16);
+    box-shadow: inset 0 0 0 1px rgba(52, 211, 153, .28);
+    color: #a7f3d0;
+}
+
+.side-nav a:focus-visible {
+    outline: 2px solid rgba(110, 231, 183, .8);
+    outline-offset: -2px;
+}
+
+.side-bottom {
+    color: #6ee7b7;
+}
+
+.side-bottom-logo {
+    background: rgba(16, 185, 129, .08);
+    box-shadow: 0 0 0 1px rgba(52, 211, 153, .2), 0 4px 14px rgba(0, 0, 0, .14);
+}
+
+.side-bottom span {
+    color: #d1fae5;
+    font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+    font-weight: 600;
+}
+
+.app-shell > .topbar {
+    background: rgba(255, 255, 255, .96);
+    border-bottom-color: #e2e8f0;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, .05);
+    color: #0f172a;
+}
+
+.topbar-left {
+    color: #0f172a;
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+    letter-spacing: -.01em;
+}
+
+.topbar-left > span:first-of-type {
+    color: #0f172a;
+    font-weight: 750;
+}
+
+.topbar-left .top-date {
+    color: #64748b;
+    font-weight: 500;
+    letter-spacing: 0;
+}
+
+.user-chip {
+    color: #475569;
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+}
+
+.user-chip strong {
+    color: #0f172a;
+}
+
+.user-chip a {
+    color: #047857;
+    font-weight: 600;
+    text-decoration: underline;
+    text-decoration-color: transparent;
+    text-underline-offset: 3px;
+    transition: text-decoration-color .18s ease, color .18s ease;
+}
+
+.user-chip a:hover {
+    color: #065f46;
+    text-decoration-color: #34d399;
+}
+
+.app-shell .topbar .menu-toggle {
+    background: #047857;
+    box-shadow: 0 1px 3px rgba(6, 95, 70, .2);
+    color: #ecfdf5;
+    transition: background-color .18s ease, box-shadow .18s ease;
+}
+
+.app-shell .topbar .menu-toggle:hover {
+    background: #065f46;
+    box-shadow: 0 2px 6px rgba(6, 95, 70, .24);
+}
+
+/* Boss statistics upper section only */
+.app-shell main .boss-page {
+    --boss-font: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+    color: #173b2f;
+    font-family: var(--boss-font);
+}
+
+.app-shell main .boss-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin: 0 0 8px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: #0f172a;
+}
+
+.app-shell main .boss-page-header h1 {
+    margin: 0;
+    color: #0f172a;
+    font-family: var(--boss-font);
+    font-size: clamp(23px, 2.4vw, 29px);
+    font-weight: 800;
+    letter-spacing: -.035em;
+}
+
+.app-shell main .boss-page-header p {
+    margin: 5px 0 0;
+    color: #64748b;
+    font-size: 13px;
+}
+
+.app-shell main .boss-view-badge {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 12px;
+    border: 1px solid #cfe7d8;
+    border-radius: 999px;
+    background: #f0fdf4;
+    color: #166534;
+    font-size: 12px;
+    font-weight: 750;
+}
+
+.app-shell main .boss-view-badge > span {
+    font-size: 14px;
+}
+
+.app-shell main .boss-readonly-note {
+    margin: 8px 0 16px;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.app-shell main .boss-kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 14px;
+    margin: 0 0 18px;
+}
+
+.app-shell main .boss-kpi {
+    --boss-accent: #047857;
+    --boss-tint: #ecfdf5;
+    --boss-border: #d1fae5;
+    --boss-title: #047857;
+    --boss-value: #064e3b;
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    border: 1px solid var(--boss-border);
+    border-top: 3px solid var(--boss-accent);
+    border-radius: 15px;
+    background: #fff;
+    box-shadow: 0 4px 16px rgba(21, 46, 35, .07);
+}
+
+.app-shell main .boss-kpi-sales {
+    --boss-accent: #15803d;
+    --boss-tint: #f0fdf4;
+    --boss-border: #dcfce7;
+    --boss-title: #15803d;
+    --boss-value: #14532d;
+}
+
+.app-shell main .boss-kpi-received {
+    --boss-accent: #059669;
+    --boss-tint: #ecfdf5;
+    --boss-border: #d1fae5;
+    --boss-title: #047857;
+    --boss-value: #064e3b;
+}
+
+.app-shell main .boss-kpi-debt {
+    --boss-accent: #e11d48;
+    --boss-tint: #fff1f2;
+    --boss-border: #ffe4e6;
+    --boss-title: #be123c;
+    --boss-value: #9f1239;
+}
+
+.app-shell main .boss-kpi-expenses {
+    --boss-accent: #d97706;
+    --boss-tint: #fffbeb;
+    --boss-border: #fef3c7;
+    --boss-title: #b45309;
+    --boss-value: #78350f;
+}
+
+.app-shell main .boss-kpi-icon {
+    display: grid;
+    flex: 0 0 42px;
+    width: 42px;
+    height: 42px;
+    place-items: center;
+    border: 1px solid var(--boss-border);
+    border-radius: 13px;
+    background: var(--boss-tint);
+    color: var(--boss-accent);
+    font-size: 20px;
+    font-weight: 800;
+}
+
+.app-shell main .boss-kpi > div {
+    min-width: 0;
+}
+
+.app-shell main .boss-kpi-label {
+    display: block;
+    margin-bottom: 5px;
+    color: var(--boss-title);
+    font-size: 11px;
+    font-weight: 750;
+    line-height: 1.35;
+}
+
+.app-shell main .boss-kpi strong {
+    display: block;
+    color: var(--boss-value);
+    font-size: clamp(16px, 1.55vw, 21px);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
+
+.app-shell main .boss-audit-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    align-items: stretch;
+    gap: 18px;
+    margin: 18px 0;
+}
+
+.app-shell main .boss-audit-grid-no-warning {
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.app-shell main .boss-audit-card {
+    min-width: 0;
+    margin: 0;
+    padding: 20px;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 1px 1px rgba(15, 23, 42, .02);
+}
+
+.app-shell main .boss-audit-card h2 {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 12px;
+    padding-bottom: 11px;
+    border-bottom: 1px solid #e2e8f0;
+    color: #0f172a;
+    font-family: var(--boss-font);
+    font-size: 16px;
+    letter-spacing: -.01em;
+}
+
+.app-shell main .boss-audit-card p,
+.app-shell main .boss-audit-card li {
+    color: #475569;
+    font-size: 12px;
+    line-height: 1.55;
+}
+
+.app-shell main .boss-payment-breakdown {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 9px;
+    margin: 14px 0;
+}
+
+.app-shell main .boss-payment-card {
+    min-width: 0;
+    padding: 11px;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    background: #f8fafc;
+}
+
+.app-shell main .boss-payment-card span {
+    display: block;
+    color: #64748b;
+    font-size: 9px;
+    font-weight: 750;
+    letter-spacing: .035em;
+    line-height: 1.4;
+    text-transform: uppercase;
+}
+
+.app-shell main .boss-payment-card strong {
+    display: block;
+    margin-top: 5px;
+    color: #0f172a;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.app-shell main .boss-financial-warnings {
+    overflow: hidden;
+    border-color: #f5d477;
+    background: linear-gradient(145deg, #fffdf6, #fff 88%);
+    box-shadow: 0 1px 2px rgba(120, 83, 10, .04), 0 6px 16px rgba(120, 83, 10, .05);
+}
+
+.app-shell main .boss-financial-warnings h2 {
+    border-bottom-color: #f4e3b2;
+}
+
+.app-shell main .boss-warning-icon {
+    display: inline-grid;
+    flex: 0 0 29px;
+    width: 29px;
+    height: 29px;
+    place-items: center;
+    border: 1px solid #f5cf68;
+    border-radius: 10px;
+    background: #fef3c7;
+    color: #b45309;
+    font-size: 15px;
+    font-weight: 800;
+}
+
+.app-shell main .boss-warning-list {
+    margin: 0;
+    padding: 12px 12px 12px 30px;
+    border: 1px solid #f5df9f;
+    border-radius: 12px;
+    background: #fffbeb;
+}
+
+.app-shell main .boss-warning-list li::marker {
+    color: #d97706;
+}
+
+.app-shell main .boss-financial-warnings > p {
+    margin-bottom: 0;
+    color: #64748b;
+}
+
+.app-shell main .boss-excel-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 0 0 18px;
+}
+
+.app-shell main .boss-excel-links a {
+    display: inline-flex;
+    min-height: 38px;
+    align-items: center;
+    gap: 7px;
+    padding: 8px 11px;
+    border: 1px solid #d1fae5;
+    border-radius: 10px;
+    background: #f0fdf4;
+    color: #166534;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.3;
+    text-decoration: none;
+    transition: background-color .18s ease, border-color .18s ease, box-shadow .18s ease;
+}
+
+.app-shell main .boss-excel-links a > span {
+    font-size: 14px;
+}
+
+.app-shell main .boss-excel-links a:hover {
+    border-color: #86efac;
+    background: #dcfce7;
+    box-shadow: 0 2px 6px rgba(22, 101, 52, .1);
+}
+
+@media (max-width: 1050px) {
+    .app-shell main .boss-kpi-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .app-shell main .boss-audit-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
+
+@media (max-width: 600px) {
+    .app-shell main .boss-page-header {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .app-shell main .boss-kpi-grid,
+    .app-shell main .boss-payment-breakdown {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .app-shell main .boss-audit-card {
+        padding: 16px;
+    }
+
+    .app-shell main .boss-payment-card {
+        padding: 10px 12px;
+    }
+}
+
+.app-shell main .boss-data-card {
+    margin: 18px 0;
+    padding: 20px;
+    border: 1px solid #e2e8f0;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .04), 0 6px 18px rgba(21, 46, 35, .05);
+    color: #173b2f;
+    font-family: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+}
+
+.app-shell main .boss-data-card h2 {
+    margin: 0 0 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid #e2e8f0;
+    color: #0f172a;
+    font-size: 18px;
+    font-weight: 750;
+    letter-spacing: -.02em;
+}
+
+.app-shell main .boss-data-card table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    color: #334155;
+    font-size: 14px;
+}
+
+.app-shell main .boss-data-card th,
+.app-shell main .boss-data-card td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #e8eeea;
+    text-align: left;
+    white-space: normal;
+}
+
+.app-shell main .boss-data-card th {
+    background: #edf4f0;
+    color: #244c3c;
+    font-size: 13px;
+    font-weight: 750;
+}
+
+.app-shell main .boss-data-card thead th:first-child {
+    border-top-left-radius: 8px;
+}
+
+.app-shell main .boss-data-card thead th:last-child {
+    border-top-right-radius: 8px;
+}
+
+.app-shell main .boss-data-card tbody tr:last-child td {
+    border-bottom: 0;
+}
+
+.app-shell main .boss-data-card tbody tr {
+    transition: background-color .15s ease;
+}
+
+.app-shell main .boss-data-card tbody tr:hover {
+    background: #f7faf8;
+}
+
+.app-shell main .boss-stock-table th:first-child,
+.app-shell main .boss-stock-table td:first-child {
+    width: 75%;
+}
+
+.app-shell main .boss-stock-table .boss-stock-quantity {
+    width: 25%;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+.app-shell main .boss-debt-card > p {
+    margin: 0 0 14px;
+    color: #64748b;
+    font-size: 14px;
+    line-height: 1.55;
+}
+
+.app-shell main .boss-debt-table-scroll {
+    overflow-x: auto;
+    border: 1px solid #e5ece7;
+    border-radius: 9px;
+    -webkit-overflow-scrolling: touch;
+}
+
+.app-shell main .boss-debt-table {
+    min-width: 980px;
+    table-layout: fixed;
+}
+
+.app-shell main .boss-debt-table th:nth-child(1),
+.app-shell main .boss-debt-table td:nth-child(1) { width: 15%; }
+.app-shell main .boss-debt-table th:nth-child(2),
+.app-shell main .boss-debt-table td:nth-child(2) { width: 12%; }
+.app-shell main .boss-debt-table th:nth-child(3),
+.app-shell main .boss-debt-table td:nth-child(3) { width: 10%; }
+.app-shell main .boss-debt-table th:nth-child(4),
+.app-shell main .boss-debt-table td:nth-child(4) { width: 15%; }
+.app-shell main .boss-debt-table th:nth-child(5),
+.app-shell main .boss-debt-table td:nth-child(5) { width: 7%; }
+.app-shell main .boss-debt-table th:nth-child(6),
+.app-shell main .boss-debt-table td:nth-child(6) { width: 16%; }
+.app-shell main .boss-debt-table th:nth-child(7),
+.app-shell main .boss-debt-table td:nth-child(7) { width: 15%; }
+.app-shell main .boss-debt-table th:nth-child(8),
+.app-shell main .boss-debt-table td:nth-child(8) { width: 10%; }
+
+.app-shell main .boss-debt-table .boss-debt-amount {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+}
+
+@media (max-width: 600px) {
+    .app-shell main .boss-data-card {
+        padding: 16px;
+    }
+
+    .app-shell main .boss-debt-table th,
+    .app-shell main .boss-debt-table td {
+        padding: 10px;
+    }
+}
+
+.app-shell main .worker-dashboard {
+    --worker-ink: #173b2f;
+    --worker-muted: #64748b;
+    --worker-line: #e2e8f0;
+    --worker-font: 'Plus Jakarta Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Arial, sans-serif;
+    width: 100%;
+    max-width: 1240px;
+    margin: 0 auto;
+    color: var(--worker-ink);
+    font-family: var(--worker-font);
+}
+
+.app-shell main .worker-dashboard *,
+.app-shell main .worker-dashboard *::before,
+.app-shell main .worker-dashboard *::after {
+    box-sizing: border-box;
+}
+
+.app-shell main .worker-dashboard-hero {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    margin: 0 0 15px;
+    padding: 23px 26px;
+    overflow: hidden;
+    border: 1px solid #0e654d;
+    border-radius: 17px;
+    background: linear-gradient(118deg, #104b39 0%, #08775a 58%, #10a078 100%);
+    color: #fff;
+    box-shadow: 0 8px 20px rgba(16, 75, 57, .16);
+}
+
+.app-shell main .worker-dashboard-brand {
+    min-width: 0;
+}
+
+.app-shell main .worker-dashboard-eyebrow,
+.app-shell main .worker-dashboard-section-eyebrow {
+    display: block;
+    color: #c6f4df;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: .11em;
+    line-height: 1.4;
+}
+
+.app-shell main .worker-dashboard-hero h1 {
+    margin: 5px 0 0;
+    color: #fff;
+    font-family: var(--worker-font);
+    font-size: clamp(22px, 2.4vw, 29px);
+    font-weight: 800;
+    letter-spacing: -.035em;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+}
+
+.app-shell main .worker-dashboard-hero p {
+    margin: 6px 0 0;
+    color: #e2f6ed;
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.app-shell main .worker-dashboard-status {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 11px;
+    border: 1px solid rgba(220, 252, 231, .34);
+    border-radius: 999px;
+    background: rgba(240, 253, 244, .12);
+    color: #f0fdf4;
+    font-size: 11px;
+    font-weight: 750;
+    white-space: nowrap;
+}
+
+.app-shell main .worker-dashboard-status > span {
+    color: #86efac;
+    font-size: 9px;
+}
+
+.app-shell main .worker-dashboard-nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+    margin: 0 0 15px;
+    padding: 8px;
+    border: 1px solid #e3ebe5;
+    border-radius: 13px;
+    background: #fff;
+    box-shadow: 0 2px 8px rgba(21, 46, 35, .04);
+}
+
+.app-shell main .worker-dashboard-nav-link {
+    display: inline-flex;
+    min-height: 38px;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    padding: 8px 11px;
+    border: 1px solid transparent;
+    border-radius: 9px;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.25;
+    text-decoration: none;
+    transition: color .16s ease, background-color .16s ease, border-color .16s ease;
+}
+
+.app-shell main .worker-dashboard-nav-link > span {
+    color: #12805c;
+    font-size: 16px;
+    line-height: 1;
+}
+
+.app-shell main .worker-dashboard-nav-link:hover,
+.app-shell main .worker-dashboard-nav-current {
+    border-color: #d1fae5;
+    background: #ecfdf5;
+    color: #14532d;
+}
+
+.app-shell main .worker-dashboard-kpis {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+    margin: 0 0 15px;
+}
+
+.app-shell main .worker-dashboard-kpi {
+    --worker-kpi-accent: #047857;
+    --worker-kpi-tint: #ecfdf5;
+    --worker-kpi-border: #d1fae5;
+    --worker-kpi-value: #064e3b;
+    position: relative;
+    display: flex;
+    min-width: 0;
+    min-height: 104px;
+    align-items: center;
+    gap: 12px;
+    padding: 15px;
+    border: 1px solid var(--worker-kpi-border);
+    border-top: 3px solid var(--worker-kpi-accent);
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 3px 12px rgba(21, 46, 35, .06);
+}
+
+.app-shell main .worker-dashboard-kpi-sales {
+    --worker-kpi-accent: #2563eb;
+    --worker-kpi-tint: #eff6ff;
+    --worker-kpi-border: #dbeafe;
+    --worker-kpi-value: #1e3a8a;
+}
+
+.app-shell main .worker-dashboard-kpi-debt {
+    --worker-kpi-accent: #d97706;
+    --worker-kpi-tint: #fffbeb;
+    --worker-kpi-border: #fde7c0;
+    --worker-kpi-value: #78350f;
+}
+
+.app-shell main .worker-dashboard-kpi-icon {
+    display: grid;
+    flex: 0 0 40px;
+    width: 40px;
+    height: 40px;
+    place-items: center;
+    border: 1px solid var(--worker-kpi-border);
+    border-radius: 12px;
+    background: var(--worker-kpi-tint);
+    color: var(--worker-kpi-accent);
+    font-size: 19px;
+    font-weight: 800;
+}
+
+.app-shell main .worker-dashboard-kpi-content {
+    min-width: 0;
+}
+
+.app-shell main .worker-dashboard-kpi-label {
+    display: block;
+    margin-bottom: 4px;
+    color: var(--worker-muted);
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.app-shell main .worker-dashboard-kpi strong {
+    display: block;
+    color: var(--worker-kpi-value);
+    font-size: clamp(17px, 1.8vw, 22px);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
+
+.app-shell main .worker-dashboard-kpi-caption {
+    position: absolute;
+    right: 12px;
+    bottom: 7px;
+    color: #94a3b8;
+    font-size: 9px;
+    font-weight: 650;
+}
+
+.app-shell main .worker-dashboard-legacy-note {
+    margin: -4px 0 15px;
+    padding: 10px 12px;
+    border: 1px solid #f5df9f;
+    border-radius: 10px;
+    background: #fffbeb;
+    color: #854d0e;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.app-shell main .worker-dashboard-content {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(260px, .85fr);
+    align-items: start;
+    gap: 13px;
+}
+
+.app-shell main .worker-dashboard-panel {
+    min-width: 0;
+    padding: 17px;
+    border: 1px solid var(--worker-line);
+    border-radius: 14px;
+    background: #fff;
+    box-shadow: 0 2px 10px rgba(21, 46, 35, .045);
+}
+
+.app-shell main .worker-dashboard-section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 13px;
+}
+
+.app-shell main .worker-dashboard-section-eyebrow {
+    color: #13805d;
+    font-size: 9px;
+    letter-spacing: .09em;
+}
+
+.app-shell main .worker-dashboard-section-heading h2 {
+    margin: 3px 0 0;
+    color: #0f172a;
+    font-family: var(--worker-font);
+    font-size: 17px;
+    font-weight: 780;
+    letter-spacing: -.02em;
+    line-height: 1.35;
+}
+
+.app-shell main .worker-dashboard-text-link {
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 5px;
+    color: #08775a;
+    font-size: 11px;
+    font-weight: 750;
+    text-decoration: none;
+}
+
+.app-shell main .worker-dashboard-text-link:hover {
+    color: #064e3b;
+}
+
+.app-shell main .worker-dashboard-cash-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.app-shell main .worker-dashboard-cash-item {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 9px;
+    padding: 11px 10px;
+    border: 1px solid #e7eee9;
+    border-radius: 11px;
+    background: #f8faf9;
+}
+
+.app-shell main .worker-dashboard-cash-icon {
+    display: grid;
+    flex: 0 0 31px;
+    width: 31px;
+    height: 31px;
+    place-items: center;
+    border-radius: 9px;
+    background: #e9f7ef;
+    color: #08775a;
+    font-size: 15px;
+    font-weight: 800;
+}
+
+.app-shell main .worker-dashboard-cash-item > div {
+    min-width: 0;
+}
+
+.app-shell main .worker-dashboard-cash-item > div > span {
+    display: block;
+    margin-bottom: 3px;
+    color: var(--worker-muted);
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.35;
+}
+
+.app-shell main .worker-dashboard-cash-item strong {
+    display: block;
+    color: #173b2f;
+    font-size: clamp(12px, 1.2vw, 14px);
+    font-variant-numeric: tabular-nums;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.app-shell main .worker-dashboard-cash-note {
+    margin: 10px 0 0;
+    color: #94a3b8;
+    font-size: 10px;
+    line-height: 1.45;
+}
+
+.app-shell main .worker-dashboard-product-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 7px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.app-shell main .worker-dashboard-product-list li {
+    display: flex;
+    min-width: 0;
+    align-items: center;
+    gap: 7px;
+    padding: 9px;
+    border: 1px solid #e7eee9;
+    border-radius: 9px;
+    background: #f8faf9;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.app-shell main .worker-dashboard-product-mark {
+    display: grid;
+    flex: 0 0 19px;
+    width: 19px;
+    height: 19px;
+    place-items: center;
+    border-radius: 6px;
+    background: #e4f6ec;
+    color: #13805d;
+    font-size: 11px;
+    font-weight: 800;
+}
+
+.app-shell main .worker-dashboard-actions-panel {
+    grid-column: 1 / -1;
+}
+
+.app-shell main .worker-dashboard-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+}
+
+.app-shell main .worker-dashboard-action {
+    display: flex;
+    min-width: 0;
+    min-height: 59px;
+    align-items: center;
+    gap: 9px;
+    padding: 9px 10px;
+    border: 1px solid #e5ece7;
+    border-radius: 11px;
+    background: #fff;
+    color: var(--worker-ink);
+    text-decoration: none;
+    transition: transform .16s ease, border-color .16s ease, background-color .16s ease, box-shadow .16s ease;
+}
+
+.app-shell main .worker-dashboard-action:hover {
+    transform: translateY(-1px);
+    border-color: #b7dfca;
+    background: #f7fcf9;
+    box-shadow: 0 4px 10px rgba(21, 46, 35, .07);
+}
+
+.app-shell main .worker-dashboard-action-primary {
+    border-color: #c7ead6;
+    background: #f0fdf4;
+}
+
+.app-shell main .worker-dashboard-action-icon {
+    display: grid;
+    flex: 0 0 34px;
+    width: 34px;
+    height: 34px;
+    place-items: center;
+    border: 1px solid #d9eee1;
+    border-radius: 10px;
+    background: #fff;
+    color: #08775a;
+    font-size: 17px;
+    font-weight: 800;
+}
+
+.app-shell main .worker-dashboard-action > span:nth-child(2) {
+    min-width: 0;
+}
+
+.app-shell main .worker-dashboard-action strong,
+.app-shell main .worker-dashboard-action small {
+    display: block;
+}
+
+.app-shell main .worker-dashboard-action strong {
+    color: #173b2f;
+    font-size: 11px;
+    font-weight: 750;
+    line-height: 1.35;
+}
+
+.app-shell main .worker-dashboard-action small {
+    margin-top: 2px;
+    color: #829087;
+    font-size: 9px;
+    line-height: 1.35;
+}
+
+.app-shell main .worker-dashboard-action-arrow {
+    flex: 0 0 auto;
+    margin-left: auto;
+    color: #94a3b8;
+    font-size: 14px;
+}
+
+@media (max-width: 900px) {
+    .app-shell main .worker-dashboard-content {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .app-shell main .worker-dashboard-actions {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 640px) {
+    .app-shell main .worker-dashboard-hero {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 12px;
+        padding: 19px;
+    }
+
+    .app-shell main .worker-dashboard-nav {
+        gap: 6px;
+        padding: 6px;
+    }
+
+    .app-shell main .worker-dashboard-nav-link {
+        flex: 1 1 calc(50% - 6px);
+        min-height: 43px;
+        justify-content: flex-start;
+        padding: 9px 10px;
+        font-size: 12px;
+    }
+
+    .app-shell main .worker-dashboard-kpis {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 9px;
+    }
+
+    .app-shell main .worker-dashboard-kpi {
+        min-height: 91px;
+        padding: 13px;
+    }
+
+    .app-shell main .worker-dashboard-kpi strong {
+        font-size: 19px;
+    }
+
+    .app-shell main .worker-dashboard-panel {
+        padding: 14px;
+    }
+
+    .app-shell main .worker-dashboard-cash-grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .app-shell main .worker-dashboard-cash-item {
+        min-height: 55px;
+    }
+
+    .app-shell main .worker-dashboard-cash-item strong {
+        font-size: 14px;
+    }
+
+    .app-shell main .worker-dashboard-actions {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .app-shell main .worker-dashboard-action {
+        min-height: 62px;
+        padding: 10px;
+    }
+}
+
+@media (max-width: 800px) {
+    .app-shell .topbar .menu-toggle {
+        position: relative;
+        z-index: 31;
+    }
+}

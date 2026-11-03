@@ -1,0 +1,63 @@
+{% extends 'base.html' %}{% from '_pagination.html' import render_pagination with context %}{% block content %}
+{% set channel_keys = {'naqd':'common.cash','plastik':'common.card','hisob':'common.bank'} %}
+{% set role_keys = {'buxgalter':'common.accountant','rahbar':'common.manager','umid':'common.production_role','maxmud':'common.sales_role'} %}
+{% set payment_method_keys = {'naqd':'common.cash','plastik':'common.card','hisob':'common.bank'} %}
+{% set transfer_status_keys = {'pending':'cash.admin.pending','approved':'cash.admin.approved','rejected':'cash.admin.rejected'} %}
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+<h2 style="margin:0">{{ t('cash.admin.title') }}</h2>
+<a data-excel-topright="1" href="{{ url_for('worker_transfers_excel') }}" style="display:inline-block;padding:7px 11px;background:#137c50;color:white;text-decoration:none;border-radius:6px;font-size:12px;font-weight:600;white-space:nowrap">📊 Excel (.xlsx)</a>
+</div><div class="card" style="padding:18px">{% for w,b in balances %}{% set role_key = role_keys.get(w.role) %}<p><b>{{ w.username }} ({{ t(role_key) if role_key else w.role }})</b>: {{ '{:,.0f}'.format(b) }} {{ t('common.som') }}</p>{% endfor %}</div>
+{% if current_user.role=='buxgalter' or current_user.role=='rahbar' %}
+<section class="card" style="padding:18px;margin:14px 0">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+<div><h3 style="margin:0 0 8px">{{ t('cash.admin.accountant_total') }}</h3><p style="margin:0;color:#52665e;font-size:13px">{{ t('cash.admin.physical_unconfirmed') }}</p></div>
+{% if current_user.role=='buxgalter' %}<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" id="toggle-cash-add" aria-expanded="false" aria-controls="account-cash-add-form">Kassaga pul qo‘shish</button><button type="button" id="toggle-account-transfer" aria-expanded="false" aria-controls="account-transfer-form">{{ t('cash.admin.transfer_between') }}</button></div>{% endif %}
+</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:10px;margin-top:16px">
+{% for channel,label in cash_channels.items() %}{% set channel_key = channel_keys.get(channel) %}<div class="card" style="padding:12px"><small>{{ t(channel_key) if channel_key else label }}</small><div style="font-size:20px;font-weight:700">{{ '{:,.2f}'.format(accountant_cash[channel]) }} {{ t('common.som') }}</div></div>{% endfor %}
+<div class="card" style="padding:12px"><small>{{ t('cash.admin.total_balance') }}</small><div style="font-size:20px;font-weight:700">{{ '{:,.2f}'.format(accountant_cash.values()|sum) }} {{ t('common.som') }}</div></div>
+</div>
+{% if current_user.role=='buxgalter' %}<form id="account-transfer-form" method="post" class="form-grid" style="display:none;margin-top:16px;padding:14px;border:1px solid #dce8df;border-radius:10px">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="operation_token" value="{{ account_cash_transfer_token() }}"><input type="hidden" name="action" value="internal_cash_transfer">
+<label>{{ t('common.date') }}<input type="date" name="date" value="{{ today }}" required></label>
+<label>{{ t('cash.admin.from_account') }}<select name="from_channel" required><option value="">{{ t('common.select') }}</option>{% for key,label in cash_channels.items() %}{% set channel_key = channel_keys.get(key) %}<option value="{{ key }}">{{ t(channel_key) if channel_key else label }}</option>{% endfor %}</select></label>
+<label>{{ t('cash.admin.to_account') }}<select name="to_channel" required><option value="">{{ t('common.select') }}</option>{% for key,label in cash_channels.items() %}{% set channel_key = channel_keys.get(key) %}<option value="{{ key }}">{{ t(channel_key) if channel_key else label }}</option>{% endfor %}</select></label>
+<label>{{ t('common.amount') }}<input type="number" name="amount" min="0.01" step="0.01" required></label>
+<label class="wide">{{ t('common.note') }}<input type="text" name="note" maxlength="500"></label>
+<div class="wide"><button type="submit">{{ t('common.confirm') }}</button></div>
+</form>{% endif %}
+{% if current_user.role=='buxgalter' %}<form id="account-cash-add-form" method="post" class="form-grid" style="display:none;margin-top:16px;padding:14px;border:1px solid #dce8df;border-radius:10px">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="operation_token" value="{{ accountant_cash_add_token() }}"><input type="hidden" name="action" value="add_accountant_cash">
+<label>{{ t('common.date') }}<input type="date" name="date" value="{{ today }}" max="{{ today }}" required></label>
+<label>{{ t('common.amount') }}<input type="number" name="amount" min="0.01" step="0.01" required></label>
+<label>Pul turi<select name="payment_method" required><option value="naqd">Naqd</option><option value="hisob">Bank</option></select></label>
+<label>Mablag‘ manbasi<input type="text" name="source" maxlength="200" required></label>
+<label class="wide">{{ t('common.note') }}<input type="text" name="note" maxlength="500"></label>
+<div class="wide"><button type="submit">Kassaga pul qo‘shish</button></div>
+</form>{% endif %}
+</section>
+{% endif %}
+<div class="card" style="padding:18px"><h3>{{ t('cash.admin.receipts_by_method') }}</h3>
+<table><thead><tr><th>{{ t('common.employee') }}</th><th>{{ t('common.cash') }}</th><th>{{ t('common.card') }}</th><th>{{ t('cash.bank_transfer') }}</th><th>{{ t('common.amount') }}</th></tr></thead><tbody>
+{% for x in received_by_worker %}<tr><td>{{ x.username }}</td>
+<td>{{ '{:,.0f}'.format(x.naqd) }}</td><td>{{ '{:,.0f}'.format(x.plastik) }}</td>
+<td>{{ '{:,.0f}'.format(x.hisob) }}</td><td><b>{{ '{:,.0f}'.format(x.naqd+x.plastik+x.hisob) }}</b></td></tr>{% endfor %}
+</tbody></table></div>
+
+<div class="card" style="padding:18px"><h3>{{ t('cash.admin.receipts_summary') }}</h3>
+<p style="color:#52665e;font-size:13px">{{ t('cash.admin.direct_receipt_note') }}</p>
+<div style="overflow-x:auto"><table><thead><tr><th>{{ t('common.employee') }}</th><th>{{ t('cash.admin.worker_submitted') }}</th><th>{{ t('cash.admin.accountant_direct') }}</th><th>{{ t('cash.admin.total_received') }}</th></tr></thead><tbody>
+{% for x in received_by_worker %}{% set transfer=x.naqd+x.plastik+x.hisob %}{% set direct=x.direct_naqd+x.direct_plastik+x.direct_hisob %}
+<tr><td><b>{{ x.username }}</b></td><td>{{ '{:,.0f}'.format(transfer) }} so‘m<br><small>Naqd: {{ '{:,.0f}'.format(x.naqd) }} · Plastik: {{ '{:,.0f}'.format(x.plastik) }} · Bank: {{ '{:,.0f}'.format(x.hisob) }}</small></td>
+<td>{{ '{:,.0f}'.format(direct) }} so‘m<br><small>Naqd: {{ '{:,.0f}'.format(x.direct_naqd) }} · Plastik: {{ '{:,.0f}'.format(x.direct_plastik) }} · Bank: {{ '{:,.0f}'.format(x.direct_hisob) }}</small></td>
+<td><b>{{ '{:,.0f}'.format(transfer+direct) }} so‘m</b></td></tr>{% endfor %}
+</tbody></table></div></div>
+<div class="card" style="padding:18px"><h3>{{ t('cash.admin.account_transfer_history') }}</h3><div style="overflow-x:auto"><table><thead><tr><th>{{ t('common.date') }}</th><th>{{ t('cash.admin.from_account') }}</th><th>{{ t('cash.admin.to_account') }}</th><th>{{ t('common.amount') }}</th><th>{{ t('common.note') }}</th><th>{{ t('common.user') }}</th><th>{{ t('common.created_at') }}</th></tr></thead><tbody>{% for transfer in account_transfers %}{% set from_key = channel_keys.get(transfer.from_channel) %}{% set to_key = channel_keys.get(transfer.to_channel) %}<tr><td>{{ transfer.date|business_date }}</td><td>{{ t(from_key) if from_key else cash_channels[transfer.from_channel] }}</td><td>{{ t(to_key) if to_key else cash_channels[transfer.to_channel] }}</td><td>{{ '{:,.2f}'.format(transfer.amount) }} {{ t('common.som') }}</td><td>{{ transfer.note or '—' }}</td><td>{{ transfer.entered_by_name }}</td><td>{{ transfer.created_at }}</td></tr>{% else %}<tr><td colspan="7">{{ t('cash.admin.no_transfers') }}</td></tr>{% endfor %}</tbody></table></div>{{ render_pagination(account_transfer_pagination) }}</div>
+<div class="card" style="padding:18px"><h3>Buxgalter kassasiga kiritilgan mablag‘lar</h3><div style="overflow-x:auto"><table><thead><tr><th>{{ t('common.date') }}</th><th>Pul turi</th><th>Mablag‘ manbasi</th><th>{{ t('common.amount') }}</th><th>{{ t('common.note') }}</th><th>{{ t('common.user') }}</th><th>{{ t('common.created_at') }}</th></tr></thead><tbody>{% for addition in accountant_cash_additions %}<tr><td>{{ addition.date|business_date }}</td><td>{{ cash_channels[addition.payment_method] }}</td><td>{{ addition.source }}</td><td>{{ '{:,.2f}'.format(addition.amount) }} {{ t('common.som') }}</td><td>{{ addition.note or '—' }}</td><td>{{ addition.entered_by_name }}</td><td>{{ addition.created_at }}</td></tr>{% else %}<tr><td colspan="7">Hozircha kassaga pul qo‘shilmagan.</td></tr>{% endfor %}</tbody></table></div>{{ render_pagination(addition_pagination) }}</div>
+<div class="card" style="padding:18px"><h3>{{ t('cash.admin.transfer_requests') }}</h3><table><tr><th>{{ t('common.employee') }}</th><th>{{ t('common.payment_method') }}</th><th>{{ t('common.amount') }}</th><th>{{ t('cash.admin.submitted_date') }}</th><th>{{ t('cash.admin.decision_date') }}</th><th>{{ t('common.status') }}</th><th>{{ t('common.action') }}</th></tr>{% for transfer in transfers %}{% set method_key = payment_method_keys.get(transfer.payment_method) %}{% set status_key = transfer_status_keys.get(transfer.status) %}<tr><td>{{ transfer.username }}</td><td><b>{{ t(method_key) if method_key else payment_methods.get(transfer.payment_method, t('common.cash')) }}</b></td><td>{{ '{:,.0f}'.format(transfer.amount) }}</td><td>{{ (transfer.created_at or '—')[:16] }}</td><td>{{ (transfer.decided_at or '—')[:16] }}</td><td>{{ t(status_key) if status_key else transfer.status }}</td><td>{% if transfer.status=='pending' and current_user.role=='buxgalter' %}<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="transfer_id" value="{{ transfer.id }}"><button name="action" value="approved">{{ t('common.confirm') }}</button><button name="action" value="rejected">{{ t('cash.admin.reject') }}</button></form>{% endif %}</td></tr>{% else %}<tr><td colspan="7">So‘rovlar mavjud emas.</td></tr>{% endfor %}</table>{{ render_pagination(transfer_request_pagination) }}</div>
+{% if current_user.role=='buxgalter' %}<script>
+const transferToggle=document.getElementById('toggle-account-transfer'),transferForm=document.getElementById('account-transfer-form');
+transferToggle.addEventListener('click',()=>{const open=transferForm.style.display==='none';transferForm.style.display=open?'grid':'none';transferToggle.setAttribute('aria-expanded',String(open))});
+const cashAddToggle=document.getElementById('toggle-cash-add'),cashAddForm=document.getElementById('account-cash-add-form');
+cashAddToggle.addEventListener('click',()=>{const open=cashAddForm.style.display==='none';cashAddForm.style.display=open?'grid':'none';cashAddToggle.setAttribute('aria-expanded',String(open))});
+</script>{% endif %}{% endblock %}

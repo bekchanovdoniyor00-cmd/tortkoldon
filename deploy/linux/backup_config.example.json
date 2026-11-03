@@ -1,0 +1,6 @@
+{
+  "source_database": "",
+  "backup_directory": "/var/backups/tortkuldon",
+  "retention_days": 30,
+  "daily_backup_time": "02:00"
+}

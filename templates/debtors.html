@@ -1,0 +1,33 @@
+{% extends 'base.html' %}{% from '_pagination.html' import render_pagination with context %}
+{% macro amount(value) %}{{ '{:,.2f}'.format(value).replace(',', ' ') }}{% endmacro %}
+{% block content %}
+<h1>{{ t('debts.title') }}</h1>
+{% if session.get('role') != 'rahbar' %}<p><a class="btn" href="{{ url_for('opening_debt_page') }}">{{ t('debts.opening_entry') }}</a></p>{% else %}<p>{{ t('debts.manager_readonly') }}</p><p><a class="btn" href="{{ url_for('unified_excel_report') }}">📥 {{ t('nav.unified_excel') }}</a></p>{% endif %}
+<p>{{ t('debts.period_note') }}</p>
+<p><strong>{{ t('debts.total_remaining') }} <span id="debtors-total">{{ amount(debt_total) }}</span> {{ t('common.som') }}</strong> {{ t('debts.calculation_source') }}</p>
+<p>{{ t('debts.active_obligation_note') }}</p>
+{% if debt_difference %}<p class="flash error">{{ t('debts.difference') }} {{ amount(debt_difference) }} {{ t('common.som') }}. {{ t('debts.review_required') }}</p>{% endif %}
+{% for key,title_key in [('ontime','debts.ontime'),('soon','debts.due_soon'),('late','debts.overdue')] %}
+<section class="panel"><h2>{{ t(title_key) }} ({{ group_counts[key] }})</h2>
+{% if groups[key] %}<table><thead><tr><th>{{ t('common.customer') }}</th><th>{{ t('debts.phone_entered') }}</th><th>{{ t('debts.active_sale_amount') }}</th><th>{{ t('debts.opening_debt') }}</th><th>{{ t('debts.active_obligation') }}</th><th>{{ t('debts.initial_payment') }}</th><th>{{ t('debts.followup_payments') }}</th><th>{{ t('debts.old_payment_fifo') }}</th><th>{{ t('debts.received') }}</th><th>{{ t('debts.remaining') }}</th><th>{{ t('debts.due_date') }}</th><th>{{ t('debts.days_left') }}</th>{% if session.get('role') != 'rahbar' %}<th>{{ t('common.action') }}</th>{% endif %}</tr></thead><tbody>
+{% for r in groups[key] %}<tr class="debtor-row" data-customer="{{ r.customer }}" data-phone="{{ r.phone }}"><td><a href="{{ url_for('customer_statement',customer=r.customer) }}">{{ r.customer }}</a></td><td>{% for phone in r.phones %}{{ phone or t('debts.not_specified') }}{% if not loop.last %}; {% endif %}{% endfor %}</td><td>{{ amount(r.sales_revenue) }}</td><td>{{ amount(r.opening_debt) }}</td><td>{{ amount(r.total) }}</td><td>{{ amount(r.initial_paid) }}</td><td>{{ amount(r.linked_paid) }}</td><td>{{ amount(r.legacy_applied) }}</td><td>{{ amount(r.paid) }}{% if r.excess %}<br>{{ t('debts.excess_amount') }} {{ amount(r.excess) }}{% endif %}</td><td class="debtor-balance">{{ amount(r.debt) }}</td><td>{{ r.due_date|business_date }}</td><td>{% if r.days_left < 0 %}{{ -r.days_left }} {{ t('debts.days_late') }}{% else %}{{ r.days_left }} {{ t('common.day') }}{% endif %}</td>{% if session.get('role') != 'rahbar' %}<td><a class="btn" href="{{ url_for('payments_page',customer=r.customer) }}">💰 {{ t('debts.pay') }}</a></td>{% endif %}</tr>{% endfor %}
+</tbody></table>{% else %}<p>{{ t('debts.no_customers') }}</p>{% endif %}{{ render_pagination(group_pagination[key]) }}</section>{% endfor %}
+<p>{{ t('debts.no_zero_balance') }}</p>
+{% if financial_totals.excess %}<p>{{ t('debts.excess_total') }} {{ amount(financial_totals.excess) }} {{ t('common.som') }}. {{ t('debts.not_deducted') }}</p>{% endif %}
+{% if unallocated_pagination.total %}<section class="panel" id="unallocated-legacy"><h2>{{ t('debts.unallocated') }}</h2><p>{{ t('debts.unallocated_note') }}</p><table><tr><th>{{ t('debts.customer_record_name') }}</th><th>{{ t('common.date') }}</th><th>{{ t('debts.payment_id') }}</th><th>{{ t('common.amount') }}</th></tr>{% for r in unallocated_legacy %}<tr><td>{{ r.customer }}</td><td>{{ r.date|business_date }}</td><td>{{ r.id }}</td><td>{{ amount(r.amount) }}</td></tr>{% endfor %}</table>{{ render_pagination(unallocated_pagination) }}</section>{% endif %}
+{% if financial_warnings %}
+{% set warning_keys = {
+'same_name_multiple_phones': 'debts.warning.same_name_multiple_phones',
+'legacy_identity_ambiguous': 'debts.warning.legacy_identity_ambiguous',
+'legacy_without_obligation': 'debts.warning.legacy_without_obligation',
+'legacy_fifo_not_explicit_link': 'debts.warning.legacy_fifo_not_explicit_link',
+'cancelled_sale_initial_payment': 'debts.warning.cancelled_sale_initial_payment',
+'receipt_without_active_sale': 'debts.warning.receipt_without_active_sale',
+'accountant_receipt_mismatch': 'debts.warning.accountant_receipt_mismatch',
+'accountant_receipt_without_source': 'debts.warning.accountant_receipt_without_source',
+'sale_overpaid': 'debts.warning.sale_overpaid'
+} %}
+<section class="panel" id="financial-warnings"><h2>{{ t('debts.warnings') }}</h2><ul>{% for warning in financial_warnings %}<li>{{ t(warning_keys.get(warning.code, 'debts.warning.fallback')) }}{% if warning.customer is defined %} {{ t('debts.customer_label') }} {{ warning.customer }}.{% endif %}{% if warning.sale_id is defined %} {{ t('debts.sale_number') }}{{ warning.sale_id }}.{% endif %}{% if warning.receipt_id is defined %} {{ t('debts.payment_number') }}{{ warning.receipt_id }}.{% endif %}{% if warning.payment_ids is defined %} {{ t('debts.old_payments_label') }} {{ warning.payment_ids|join(', ') }}.{% endif %}</li>{% endfor %}</ul><p>{{ t('debts.unchanged') }}</p></section>
+{% endif %}
+
+{% endblock %}

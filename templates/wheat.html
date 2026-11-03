@@ -1,0 +1,105 @@
+{% extends 'base.html' %}
+{% from '_pagination.html' import render_pagination with context %}
+{% block content %}
+<h1>Bug‘doy xaridi</h1>
+<section class="panel">
+  <h2>Umumiy bug‘doy zaxirasi: {{ '%.3f'|format(stock/1000) }} tonna</h2>
+  <p class="muted">Naqd yoki bank orqali (birja) xaridlar bitta zaxiraga qo‘shiladi. Tozalash ishlab chiqarish bo‘limida qayd etiladi.</p>
+  {% if current_user.role=='buxgalter' %}
+    {% if opening_wheat_stock %}
+    <p class="muted">Boshlang‘ich zaxira: {{ opening_wheat_stock.date|business_date }} — {{ '%.2f'|format(opening_wheat_stock.net) }} kg. Qayta kiritilmaydi.</p>
+    {% else %}
+    <button type="button" id="toggle-wheat-opening" aria-expanded="false" aria-controls="wheat-opening-form" style="background:#13834b;color:white;padding:8px 13px;border:0;border-radius:8px;font-weight:600">+ Bug‘doy zaxirasini qo‘shish</button>
+    <form id="wheat-opening-form" method="post" action="{{ url_for('add_opening_wheat_stock') }}" class="form-grid" style="display:none;margin:16px 0;padding:14px;border:1px solid #dce8df;border-radius:10px">
+      <input type="hidden" name="operation_token" value="{{ write_operation_token('wheat_opening_stock') }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <label>Sana<input type="date" name="date" value="{{ today }}" required></label>
+      <label>Miqdor (kg)<input type="number" name="qty_kg" min="0.01" step="0.01" required></label>
+      <label class="wide">Izoh<input type="text" name="note" maxlength="500"></label>
+      <div class="wide"><button type="submit">Boshlang‘ich zaxirani saqlash</button></div>
+      <p class="wide muted">Bu boshlang‘ich fizik qoldiq: xarid, yetkazib beruvchi to‘lovi, kassa chiqimi yoki qarz yozilmaydi. Faqat bir marta kiritiladi.</p>
+    </form>
+    {% endif %}
+  {% endif %}
+  <p class="muted">Buxgalter naqd kassasi: {{ '%.2f'|format(accountant_cash.naqd) }} so‘m · Bank hisobi: {{ '%.2f'|format(accountant_cash.hisob) }} so‘m</p>
+  <form method="post" class="form-grid">
+    <input type="hidden" name="operation_token" value="{{ write_operation_token('wheat') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label>Sana<input type="date" name="date"></label>
+    <label>To‘lov usuli
+      <select name="purchase_method" required>
+        <option value="naqd">NAQD</option>
+        <option value="bank">BANK ORQALI (BIRJA)</option>
+      </select>
+    </label>
+    <label>Yetkazuvchi<input name="supplier"></label>
+    <label>Og‘irlik birligi
+      <select name="unit" id="wheat-unit">
+        <option value="tonna">Tonna</option>
+        <option value="kg">Kilogramm</option>
+      </select>
+    </label>
+    <label>Brutto<input type="number" name="gross" id="wheat-gross" step="0.001" min="0.001" required></label>
+    <label>Tara<input type="number" name="tare" id="wheat-tare" step="0.001" min="0" value="0" required></label>
+    <label>Narx birligi
+      <select name="price_unit" id="wheat-price-unit">
+        <option value="kg">So‘m/kg</option>
+        <option value="tonna">So‘m/tonna</option>
+      </select>
+    </label>
+    <label>Narx<input type="number" name="price" id="wheat-price" step="0.01" min="0.01" required></label>
+    <p class="wide muted">To‘liq to‘lov summasi: <strong id="wheat-total">0,00 so‘m</strong></p>
+    <label class="wide">Izoh<input name="note"></label>
+    <button>Xaridni to‘liq to‘lab saqlash</button>
+  </form>
+</section>
+{% if current_user.role=='buxgalter' and not opening_wheat_stock %}
+<script>
+const wheatOpeningToggle=document.getElementById('toggle-wheat-opening'),wheatOpeningForm=document.getElementById('wheat-opening-form');
+wheatOpeningToggle.addEventListener('click',()=>{const open=wheatOpeningForm.style.display==='none';wheatOpeningForm.style.display=open?'grid':'none';wheatOpeningToggle.setAttribute('aria-expanded',String(open))});
+</script>
+{% endif %}
+<section class="panel">
+  <h2>Xaridlar tarixi</h2>
+  <table>
+    <tr><th>Sana</th><th>Xarid turi</th><th>Yetkazuvchi</th><th>Brutto (t)</th><th>Tara (t)</th><th>Sof (t)</th><th>Narx (so‘m/kg)</th><th>Izoh</th></tr>
+    {% for r in rows %}
+    <tr>
+      <td>{{ r.date|business_date }}</td>
+      <td>{{ r.purchase_method }}</td>
+      <td>{{ r.supplier or '—' }}</td>
+      <td>{{ '%.3f'|format(r.gross/1000) }}</td>
+      <td>{{ '%.3f'|format(r.tare/1000) }}</td>
+      <td>{{ '%.3f'|format(r.net/1000) }}</td>
+      <td>{{ '%.2f'|format(r.price_per_kg) }}</td>
+      <td>{{ r.note or '—' }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  {{ render_pagination(pagination) }}
+</section>
+<script>
+(() => {
+  const gross = document.getElementById('wheat-gross');
+  const tare = document.getElementById('wheat-tare');
+  const unit = document.getElementById('wheat-unit');
+  const price = document.getElementById('wheat-price');
+  const priceUnit = document.getElementById('wheat-price-unit');
+  const total = document.getElementById('wheat-total');
+  const updateTotal = () => {
+    const grossKg = (Number(gross.value) || 0) * (unit.value === 'tonna' ? 1000 : 1);
+    const tareKg = (Number(tare.value) || 0) * (unit.value === 'tonna' ? 1000 : 1);
+    const pricePerKg = (Number(price.value) || 0) / (priceUnit.value === 'tonna' ? 1000 : 1);
+    const amount = Math.max(0, grossKg - tareKg) * pricePerKg;
+    total.textContent = Number.isFinite(amount)
+      ? `${amount.toLocaleString('uz-UZ', {minimumFractionDigits: 2, maximumFractionDigits: 2})} so‘m`
+      : '—';
+  };
+  [gross, tare, unit, price, priceUnit].forEach((input) => {
+    input.addEventListener('input', updateTotal);
+    input.addEventListener('change', updateTotal);
+  });
+  updateTotal();
+})();
+</script>
+{% endblock %}

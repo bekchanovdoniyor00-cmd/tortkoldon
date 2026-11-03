@@ -1,0 +1,64 @@
+{% extends "base.html" %}{% from '_pagination.html' import render_pagination with context %}
+{% block content %}
+<div class="boss-page">
+<header class="boss-page-header">
+<div><h1>📊 Boshliq statistikasi</h1><p>Korxona ko‘rsatkichlari va moliyaviy holati</p></div>
+<span class="boss-view-badge"><span aria-hidden="true">◉</span> Faqat ko‘rish rejimi</span>
+</header>
+<p class="boss-readonly-note">Sotuv, to‘lov, qarz, ombor yoki xarajatlarni o‘zgartirish huquqi mavjud emas.</p>
+<div class="boss-kpi-grid">
+<div class="boss-kpi boss-kpi-sales"><span class="boss-kpi-icon" aria-hidden="true">↗</span><div><span class="boss-kpi-label">Sotuv daromadi</span><strong id="financial-sales">{{ '{:,.2f}'.format(sales).replace(',', ' ') }} so‘m</strong></div></div>
+<div class="boss-kpi boss-kpi-received"><span class="boss-kpi-icon" aria-hidden="true">✓</span><div><span class="boss-kpi-label">Qabul qilingan pul</span><strong id="financial-received">{{ '{:,.2f}'.format(receipts).replace(',', ' ') }} so‘m</strong></div></div>
+<div class="boss-kpi boss-kpi-debt"><span class="boss-kpi-icon" aria-hidden="true">♧</span><div><span class="boss-kpi-label">Qarz qoldig‘i</span><strong id="financial-debt">{{ '{:,.2f}'.format(debts).replace(',', ' ') }} so‘m</strong></div></div>
+<div class="boss-kpi boss-kpi-expenses"><span class="boss-kpi-icon" aria-hidden="true">▤</span><div><span class="boss-kpi-label">Xarajatlar</span><strong>{{ '{:,.0f}'.format(expenses).replace(',', ' ') }} so‘m</strong></div></div>
+</div>
+<section class="boss-audit-card" style="margin:16px 0">
+<h2>Buxgalter umumiy kassasi — faqat ko‘rish</h2>
+<p>Hisobiy qoldiq; boshlang‘ich fizik saldo tasdiqlanmagan.</p>
+<div class="boss-payment-breakdown">
+{% for channel,label in cash_channels.items() %}<div class="boss-payment-card"><span>{{ label }}</span><strong>{{ '{:,.2f}'.format(accountant_cash[channel]).replace(',', ' ') }} so‘m</strong></div>{% endfor %}
+<div class="boss-payment-card"><span>Jami kassa qoldig‘i</span><strong>{{ '{:,.2f}'.format(accountant_cash.values()|sum).replace(',', ' ') }} so‘m</strong></div>
+</div>
+<h3>Hisoblar orasidagi pul ko‘chirishlar tarixi</h3>
+<div style="overflow-x:auto"><table><thead><tr><th>Sana</th><th>Qaysi hisobdan</th><th>Qaysi hisobga</th><th>Summa</th><th>Izoh</th><th>Kiritgan foydalanuvchi</th><th>Yaratilgan vaqt</th></tr></thead><tbody>{% for t in account_transfers %}<tr><td>{{ t.date|business_date }}</td><td>{{ cash_channels[t.from_channel] }}</td><td>{{ cash_channels[t.to_channel] }}</td><td>{{ '{:,.2f}'.format(t.amount) }} so‘m</td><td>{{ t.note or '—' }}</td><td>{{ t.entered_by_name }}</td><td>{{ t.created_at }}</td></tr>{% else %}<tr><td colspan="7">Ko‘chirishlar mavjud emas.</td></tr>{% endfor %}</tbody></table></div>{{ render_pagination(transfer_pagination) }}
+</section>
+<div class="boss-audit-grid{% if not financial_warnings %} boss-audit-grid-no-warning{% endif %}">
+<section class="boss-audit-card boss-financial-explanation" id="financial-explanation"><h2>Moliyaviy ko‘rsatkichlar izohi</h2><p>Ko‘rsatkichlar barcha sanalar bo‘yicha. Qarz qaytimi sotuv daromadiga qayta qo‘shilmaydi. Eski qarz yangi sotuv emas. Qabul qilingan pul — korxona bo‘yicha tushum; bu buxgalter kassasidagi joriy qoldiq emas.</p>
+<div class="boss-payment-breakdown">
+<div class="boss-payment-card"><span>Boshlang‘ich to‘lovlar</span><strong>{{ '{:,.2f}'.format(financial_totals.initial_received).replace(',', ' ') }} so‘m</strong></div>
+<div class="boss-payment-card"><span>Keyingi qarz to‘lovlari</span><strong>{{ '{:,.2f}'.format(financial_totals.linked_received).replace(',', ' ') }} so‘m</strong></div>
+<div class="boss-payment-card"><span>Eski to‘lovlar</span><strong>{{ '{:,.2f}'.format(financial_totals.legacy_received).replace(',', ' ') }} so‘m</strong></div>
+</div>
+<p>Keyingi qarz to‘lovlaridan buxgalter bevosita olgan: {{ '{:,.2f}'.format(financial_totals.accountant_collected_receipts).replace(',', ' ') }} so‘m. Bu summa yuqoridagi tushum tarkibida, xodim kassasiga qo‘shilmaydi.</p>{% if financial_totals.excess %}<p>Majburiyatdan ortiq to‘lov: {{ '{:,.2f}'.format(financial_totals.excess).replace(',', ' ') }} so‘m. Boshqa xaridor yoki sotuv qarziga avtomatik o‘tkazilmadi.</p>{% endif %}{% if financial_totals.unallocated_legacy %}<p>Taqsimlanmagan eski to‘lov: {{ '{:,.2f}'.format(financial_totals.unallocated_legacy).replace(',', ' ') }} so‘m. Tushumda bir marta hisoblangan, qarzdan ayirilmagan.</p>{% endif %}</section>
+{% if financial_warnings %}
+{% set warning_text = {
+'same_name_multiple_phones': 'Bir xil ismga turli telefonlar mos keladi. Hisoblar telefon bo‘yicha alohida saqlandi.',
+'legacy_identity_ambiguous': 'Eski to‘lovning qaysi xaridorga tegishliligi noaniq. Pul taxminan taqsimlanmadi.',
+'legacy_without_obligation': 'Eski to‘lovga mos faol majburiyat topilmadi. Pul taqsimlanmadi.',
+'legacy_fifo_not_explicit_link': 'Eski to‘lov FIFO bo‘yicha hisoblandi: sana, bir kunda eski qarz avval, so‘ng yozuv raqami. Bu tarixiy sotuvga aniq bog‘lanish isboti emas.',
+'cancelled_sale_initial_payment': 'Bekor qilingan sotuvda boshlang‘ich to‘lov mavjud. Pul tushumda saqlandi; qaytarilgan deb hisoblanmadi.',
+'receipt_without_active_sale': 'Keyingi to‘lov faol sotuvga bog‘lanmagan. Pul tushumda saqlandi; alohida tekshirish zarur.',
+'accountant_receipt_mismatch': 'Buxgalter qabul qilgan to‘lov tafsilotlari asosiy to‘lov yozuviga mos emas. Asosiy to‘lov bir marta hisoblandi.',
+'accountant_receipt_without_source': 'Buxgalter qaydiga mos asosiy to‘lov yozuvi yo‘q. Qo‘shimcha tushum deb sanalmadi.',
+'sale_overpaid': 'Sotuvga biriktirilgan to‘lov majburiyatdan oshgan. Ortiqcha pul boshqa qarzga o‘tkazilmadi.'
+} %}
+<section class="boss-audit-card boss-financial-warnings" id="financial-warnings"><h2><span class="boss-warning-icon" aria-hidden="true">!</span>Hisobni tekshirish zarur</h2><ul class="boss-warning-list">{% for warning in financial_warnings %}<li>{{ warning_text.get(warning.code, 'Moliyaviy yozuvni alohida tekshirish zarur.') }}{% if warning.customer is defined %} Xaridor: {{ warning.customer }}.{% endif %}{% if warning.sale_id is defined %} Sotuv №{{ warning.sale_id }}.{% endif %}{% if warning.receipt_id is defined %} To‘lov №{{ warning.receipt_id }}.{% endif %}{% if warning.payment_ids is defined %} Eski to‘lovlar: {{ warning.payment_ids|join(', ') }}.{% endif %}</li>{% endfor %}</ul><p>Mavjud ma’lumotlar o‘zgartirilmadi.</p></section>
+{% endif %}
+</div>
+<div class="boss-excel-links" aria-label="Excel hisobotlari">
+<a href="{{ url_for('excel_report',type='stocks') }}"><span aria-hidden="true">▦</span> Ombor Excel</a>
+<a href="{{ url_for('unified_excel_report') }}"><span aria-hidden="true">📥</span> Yagona Excel hisobot</a>
+<a href="{{ url_for('excel_report',type='expenses') }}"><span aria-hidden="true">▤</span> Xarajatlar Excel</a>
+</div>
+</div>
+<section class="boss-data-card boss-stock-card">
+<h2>🏭 Ombor qoldiqlari</h2>
+<table class="boss-stock-table"><thead><tr><th scope="col">Mahsulot</th><th class="boss-stock-quantity" scope="col">Qoldiq (kg)</th><th scope="col">25 kg qop</th><th scope="col">50 kg qop</th></tr></thead><tbody>{% for name,qty in stocks %}<tr><td>{{ name }}</td><td class="boss-stock-quantity">{{ '{:,.2f}'.format(qty).replace(',', ' ') }} kg</td><td>{{ bagged_stocks[name][25] if name in bagged_stocks else '—' }}</td><td>{{ bagged_stocks[name][50] if name in bagged_stocks else '—' }}</td></tr>{% endfor %}</tbody></table>
+<p class="muted">Qop soni faqat qop o‘lchami aniq qayd etilgan yangi ishlab chiqarish va sotuvlarga asoslangan. Eski kg yozuvlari qop o‘lchamiga aylantirilmagan.</p>
+</section>
+<section class="boss-data-card boss-debt-card">
+<h2>👥 Qarzdorlar va qarz tafsilotlari</h2>
+<p>Eski qarzlar uchun mahsulot va xodim tarixda ko‘rsatilmagan bo‘lishi mumkin. Xodim nomi mavjud sotuv yozuvidagi foydalanuvchiga asoslanadi; eski yozuvlar hali Umid/Maxmudga ajratilmagan.</p>
+<div class="boss-debt-table-scroll"><table class="boss-debt-table"><thead><tr><th scope="col">Xaridor</th><th scope="col">Telefon</th><th scope="col">Sana</th><th scope="col">Mahsulot</th><th scope="col">Kg</th><th scope="col">Sotgan xodim</th><th class="boss-debt-amount" scope="col">Qolgan qarz</th><th scope="col">Muddat</th></tr></thead><tbody>{% for r in details %}<tr><td>{{ r.customer }}</td><td>{{ r.phone }}</td><td>{{ r.date|business_date }}</td><td>{{ r.product }}</td><td>{{ r.qty if r.qty is not none else '—' }}</td><td>{{ r.seller }}</td><td class="boss-debt-amount">{{ '{:,.2f}'.format(r.balance).replace(',', ' ') }}</td><td>{{ r.due }}</td></tr>{% else %}<tr><td colspan="8">Qarzdor topilmadi.</td></tr>{% endfor %}</tbody></table></div>{{ render_pagination(debt_pagination) }}
+</section>
+{% endblock %}

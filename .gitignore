@@ -1,0 +1,14 @@
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+*.sqlite
+!data/tortkuldon_clean.sqlite
+tortkuldon.db
+*.log
+.DS_Store
+Thumbs.db
+.sinov_session_key
+zaxira_nusxalar/

@@ -1,0 +1,78 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="worker-dashboard">
+    <header class="worker-dashboard-hero">
+        <div class="worker-dashboard-brand">
+            <span class="worker-dashboard-eyebrow">TO‘RTKO‘L DON MAHSULOTI · {{ t('cash.worker.panel') }}</span>
+            <h1>{{ role_name }} — {{ t('employee.personal_account') }}</h1>
+            <p>{{ t('employee.dashboard_intro') }}</p>
+        </div>
+        <span class="worker-dashboard-status"><span aria-hidden="true">●</span> {{ t('employee.cabinet') }}</span>
+    </header>
+
+    <nav class="worker-dashboard-nav" aria-label="{{ t('employee.sections') }}">
+        <a class="worker-dashboard-nav-link worker-dashboard-nav-current" href="{{ url_for('worker_sales') }}" aria-current="page"><span aria-hidden="true">⌂</span> {{ t('cash.worker.nav.home') }}</a>
+        <a class="worker-dashboard-nav-link" href="{{ url_for('worker_sale_form') }}"><span aria-hidden="true">＋</span> {{ t('cash.worker.nav.new_sale') }}</a>
+        {% if current_user.role == 'umid' %}<a class="worker-dashboard-nav-link" href="{{ url_for('production_page') }}"><span aria-hidden="true">⚙</span> {{ t('common.production_role') }}</a>{% endif %}
+        <a class="worker-dashboard-nav-link" href="{{ url_for('worker_debts') }}"><span aria-hidden="true">↻</span> {{ t('cash.worker.nav.debt_payment') }}</a>
+        <a class="worker-dashboard-nav-link" href="{{ url_for('worker_archive') }}"><span aria-hidden="true">▤</span> {{ t('cash.worker.nav.archive') }}</a>
+        <a class="worker-dashboard-nav-link" href="{{ url_for('worker_customers_page') }}"><span aria-hidden="true">♧</span> {{ t('cash.worker.nav.customers') }}</a>
+        <a class="worker-dashboard-nav-link" href="{{ url_for('worker_cash_page') }}"><span aria-hidden="true">₊</span> {{ t('cash.worker.nav.cash') }}</a>
+    </nav>
+
+    <section class="worker-dashboard-kpis" aria-label="{{ t('employee.metrics') }}">
+        <article class="worker-dashboard-kpi worker-dashboard-kpi-cash">
+            <span class="worker-dashboard-kpi-icon" aria-hidden="true">₊</span>
+            <div class="worker-dashboard-kpi-content"><span class="worker-dashboard-kpi-label">{{ t('employee.cash_balance') }}</span><strong>{{ '{:,.0f}'.format(balance).replace(',', ' ') }} {{ t('common.som') }}</strong></div>
+            <span class="worker-dashboard-kpi-caption">{{ t('employee.current_balance') }}</span>
+        </article>
+        <article class="worker-dashboard-kpi worker-dashboard-kpi-sales">
+            <span class="worker-dashboard-kpi-icon" aria-hidden="true">↗</span>
+            <div class="worker-dashboard-kpi-content"><span class="worker-dashboard-kpi-label">{{ t('employee.active_sales') }}</span><strong>{{ active_count }} {{ t('employee.count_suffix') }}</strong></div>
+            <span class="worker-dashboard-kpi-caption">{{ t('employee.not_cancelled') }}</span>
+        </article>
+        <article class="worker-dashboard-kpi worker-dashboard-kpi-debt">
+            <span class="worker-dashboard-kpi-icon" aria-hidden="true">◷</span>
+            <div class="worker-dashboard-kpi-content"><span class="worker-dashboard-kpi-label">{{ t('employee.remaining_debt') }}</span><strong>{{ '{:,.0f}'.format(total_debt).replace(',', ' ') }} {{ t('common.som') }}</strong></div>
+            <span class="worker-dashboard-kpi-caption">{{ t('employee.personal_sales') }}</span>
+        </article>
+    </section>
+    {% if legacy_estimated_total or legacy_payment_warning %}<p class="worker-dashboard-legacy-note">{{ t('employee.legacy_note') }}{% if legacy_estimated_total %}Qarzning {{ '{:,.2f}'.format(legacy_estimated_total).replace(',', ' ') }} {{ t('employee.legacy_fifo_estimate') }}{% endif %}{% if legacy_payment_warning %}{{ t('employee.legacy_blocked') }}{% endif %}</p>{% endif %}
+
+    <div class="worker-dashboard-content">
+        <section class="worker-dashboard-panel worker-dashboard-cash-panel">
+            <div class="worker-dashboard-section-heading">
+                <div><span class="worker-dashboard-section-eyebrow">{{ t('employee.funds') }}</span><h2>{{ t('employee.cash_composition') }}</h2></div>
+                <a class="worker-dashboard-text-link" href="{{ url_for('worker_cash_page') }}">{{ t('employee.open_cash') }} <span aria-hidden="true">→</span></a>
+            </div>
+            <div class="worker-dashboard-cash-grid">
+                <article class="worker-dashboard-cash-item"><span class="worker-dashboard-cash-icon" aria-hidden="true">◉</span><div><span>{{ t('common.cash') }}</span><strong>{{ '{:,.0f}'.format(channel_balances.naqd).replace(',', ' ') }} {{ t('common.som') }}</strong></div></article>
+                <article class="worker-dashboard-cash-item"><span class="worker-dashboard-cash-icon" aria-hidden="true">▣</span><div><span>{{ t('common.card') }}</span><strong>{{ '{:,.0f}'.format(channel_balances.plastik).replace(',', ' ') }} {{ t('common.som') }}</strong></div></article>
+                <article class="worker-dashboard-cash-item"><span class="worker-dashboard-cash-icon" aria-hidden="true">⇄</span><div><span>{{ t('employee.bank_payment') }}</span><strong>{{ '{:,.0f}'.format(channel_balances.hisob).replace(',', ' ') }} {{ t('common.som') }}</strong></div></article>
+            </div>
+            <p class="worker-dashboard-cash-note">{{ t('employee.cash_summary_note') }}</p>
+        </section>
+
+        <section class="worker-dashboard-panel worker-dashboard-products-panel">
+            <div class="worker-dashboard-section-heading">
+                <div><span class="worker-dashboard-section-eyebrow">{{ t('employee.directions') }}</span><h2>{{ t('employee.products') }}</h2></div>
+            </div>
+            <ul class="worker-dashboard-product-list">{% for product in products %}<li><span class="worker-dashboard-product-mark" aria-hidden="true">✓</span>{{ product }}</li>{% endfor %}</ul>
+        </section>
+
+        <section class="worker-dashboard-panel worker-dashboard-actions-panel">
+            <div class="worker-dashboard-section-heading">
+                <div><span class="worker-dashboard-section-eyebrow">{{ t('employee.daily_work') }}</span><h2>{{ t('employee.quick_actions') }}</h2></div>
+            </div>
+            <div class="worker-dashboard-actions">
+                <a class="worker-dashboard-action worker-dashboard-action-primary" href="{{ url_for('worker_sale_form') }}"><span class="worker-dashboard-action-icon" aria-hidden="true">＋</span><span><strong>{{ t('cash.worker.nav.new_sale') }}</strong><small>{{ t('employee.register_sale') }}</small></span><span class="worker-dashboard-action-arrow" aria-hidden="true">→</span></a>
+                <a class="worker-dashboard-action" href="{{ url_for('worker_debts') }}"><span class="worker-dashboard-action-icon" aria-hidden="true">↻</span><span><strong>{{ t('cash.worker.nav.debt_payment') }}</strong><small>{{ t('employee.record_payment') }}</small></span><span class="worker-dashboard-action-arrow" aria-hidden="true">→</span></a>
+                <a class="worker-dashboard-action" href="{{ url_for('worker_customers_page') }}"><span class="worker-dashboard-action-icon" aria-hidden="true">♧</span><span><strong>{{ t('cash.worker.nav.customers') }}</strong><small>{{ t('employee.customer_list') }}</small></span><span class="worker-dashboard-action-arrow" aria-hidden="true">→</span></a>
+                <a class="worker-dashboard-action" href="{{ url_for('worker_cash_page') }}"><span class="worker-dashboard-action-icon" aria-hidden="true">₊</span><span><strong>{{ t('cash.worker.nav.cash') }}</strong><small>{{ t('employee.balance_movements') }}</small></span><span class="worker-dashboard-action-arrow" aria-hidden="true">→</span></a>
+                <a class="worker-dashboard-action" href="{{ url_for('worker_archive') }}"><span class="worker-dashboard-action-icon" aria-hidden="true">▤</span><span><strong>{{ t('cash.worker.nav.archive') }}</strong><small>{{ t('employee.view_previous_sales') }}</small></span><span class="worker-dashboard-action-arrow" aria-hidden="true">→</span></a>
+                {% if current_user.role == 'umid' %}<a class="worker-dashboard-action" href="{{ url_for('production_page') }}"><span class="worker-dashboard-action-icon" aria-hidden="true">⚙</span><span><strong>{{ t('common.production_role') }}</strong><small>{{ t('employee.production_section') }}</small></span><span class="worker-dashboard-action-arrow" aria-hidden="true">→</span></a>{% endif %}
+            </div>
+        </section>
+    </div>
+</div>
+{% endblock %}

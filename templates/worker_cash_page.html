@@ -1,0 +1,49 @@
+{% extends 'base.html' %}{% block content %}
+<style>
+:root{--wgreen:#076d51}
+.w-shell{max-width:1320px;margin:20px auto;padding:0 14px;color:#183d35;font-family:system-ui,sans-serif}
+.w-hero{padding:24px 28px;background:linear-gradient(120deg,#0b614b,#138468);border-radius:20px;color:white;margin-bottom:18px}
+.w-hero h1{margin:0;font-size:27px;color:#fff!important}.w-hero p{margin:8px 0 0;opacity:1;color:#ecfff8!important}
+.w-menu{display:flex;flex-wrap:wrap;gap:9px;margin:0 0 22px}
+.w-menu a{padding:11px 15px;background:white;border:1px solid #dce8e2;border-radius:12px;text-decoration:none;color:#165b47;font-weight:650}
+.w-menu a:hover{background:#e7f6ee}
+.w-body{background:white;border:1px solid #e0e9e4;border-radius:17px;padding:22px;box-shadow:0 8px 22px #173e3010}
+.w-body .card{box-shadow:none;border:0;padding:0!important}
+.w-body input,.w-body select{max-width:100%;box-sizing:border-box}
+.w-table{overflow-x:auto}.w-table table{min-width:780px}
+.w-tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:15px}
+.w-tile{border-radius:16px;padding:22px;background:#e8f6ef}.w-tile:nth-child(2){background:#ecf2fe}.w-tile:nth-child(3){background:#fff3df}
+.w-tile strong{font-size:27px;display:block;margin-top:10px}
+@media(max-width:700px){.w-tiles{grid-template-columns:1fr}.w-hero{padding:18px}}
+</style>{% set method_keys = {'naqd':'common.cash','plastik':'common.card','hisob':'common.bank'} %}{% set status_keys = {'pending':'cash.admin.pending','approved':'cash.admin.approved','rejected':'cash.admin.rejected'} %}<div class="w-shell"><div class="w-hero"><h1>{{ role_name }} {{ t('cash.worker.personal_account_title') }}</h1><p>TO‘RTKO‘L DON MAHSULOTI · {{ t('cash.worker.panel') }}</p></div>
+<nav class="w-menu">
+<a href="{{ url_for('worker_sales') }}">{{ t('cash.worker.nav.home') }}</a>
+<a href="{{ url_for('worker_sale_form') }}">{{ t('cash.worker.nav.new_sale') }}</a>
+<a href="{{ url_for('worker_debts') }}">{{ t('cash.worker.nav.debt_payment') }}</a>
+<a href="{{ url_for('worker_archive') }}">{{ t('cash.worker.nav.archive') }}</a>
+<a href="{{ url_for('worker_customers_page') }}">{{ t('cash.worker.nav.customers') }}</a>
+<a href="{{ url_for('worker_cash_page') }}">{{ t('cash.worker.nav.cash') }}</a>
+</nav><main class="w-body">
+<h2>{{ t('cash.worker.personal_accounts') }}</h2><div class="w-tiles" style="margin-bottom:20px">
+<div class="w-tile">{{ t('common.cash') }}<strong>{{ '{:,.0f}'.format(channel_balances.naqd) }} {{ t('common.som') }}</strong></div>
+<div class="w-tile">{{ t('common.card') }}<strong>{{ '{:,.0f}'.format(channel_balances.plastik) }} {{ t('common.som') }}</strong></div>
+<div class="w-tile">{{ t('cash.bank_transfer') }}<strong>{{ '{:,.0f}'.format(channel_balances.hisob) }} {{ t('common.som') }}</strong></div></div>
+<p><b>{{ t('cash.worker.total_three') }} {{ '{:,.0f}'.format(balance) }} {{ t('common.som') }}</b></p>
+<div class="card" style="padding:18px">
+<h3>{{ t('cash.worker.expense') }}</h3>
+<p>{{ t('cash.worker.fund_source') }} <b>{{ role_name }} {{ t('cash.worker.cash_register') }}</b></p>
+<form method="post" action="{{ url_for('worker_expense') }}">
+<input type="hidden" name="operation_token" value="{{ worker_expense_token() }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<select name="payment_method" required><option value="naqd">💵 {{ t('common.cash') }}</option><option value="plastik">💳 {{ t('common.card') }}</option><option value="hisob">🏦 {{ t('common.bank') }}</option></select>
+<select name="category"><option value="Yo‘l haqi">{{ t('cash.worker.category.travel') }}</option><option value="Yuk tushirish">{{ t('cash.worker.category.unloading') }}</option><option value="Transport">{{ t('cash.worker.category.transport') }}</option><option value="Boshqa xarajat">{{ t('cash.worker.category.other') }}</option></select>
+<input type="number" name="amount" min="0.01" step="any" placeholder="{{ t('common.amount') }}" required>
+<input name="note" placeholder="{{ t('common.note') }}">
+<button>{{ t('common.save') }}</button>
+</form>
+<h3>{{ t('cash.worker.transfer_to_accountant') }}</h3><form method="post" action="{{ url_for('worker_transfer') }}"><input type="hidden" name="operation_token" value="{{ write_operation_token('worker_transfer') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="number" name="amount" min="0.01" step="any" required placeholder="{{ t('common.amount') }}"> <select name="payment_method" required><option value="naqd">💵 {{ t('common.cash') }}</option><option value="plastik">💳 {{ t('common.card') }}</option><option value="hisob">🏦 {{ t('common.bank') }}</option></select> <button>{{ t('cash.worker.send_for_approval') }}</button></form><p>{{ t('cash.worker.approval_note') }}</p>
+</div>
+<div class="card" style="padding:18px"><h3>{{ t('cash.worker.expenses') }}</h3>{% for x in expenses %}{% set method_key = method_keys.get(x.payment_method) %}<p>{{ x.date|business_date }} — {{ x.category }} — {{ '{:,.2f}'.format(x.amount) }} {{ t('common.som') }} ({{ t(method_key) if method_key else x.payment_method_display }}, {{ x.fund_source_display }}) — {{ t('cash.worker.entered_by') }} {{ x.entered_by_display }}</p>{% else %}<p>{{ t('cash.worker.none') }}</p>{% endfor %}<h3>{{ t('cash.worker.receipt_requests') }}</h3>{% for transfer in transfers %}{% set method_key = method_keys.get(transfer.payment_method) %}{% set status_key = status_keys.get(transfer.status) %}<p>{{ transfer.created_at }} — {{ '{:,.0f}'.format(transfer.amount) }} {{ t('common.som') }} ({{ t(method_key) if method_key else payment_methods.get(transfer.payment_method, 'Naqd') }}) — {{ t(status_key) if status_key else transfer.status }}</p>{% else %}<p>{{ t('cash.worker.none') }}</p>{% endfor %}</div>
+<div class="card" style="padding:18px"><h3>{{ t('cash.worker.receipt_history') }}</h3>
+{% for r in recent_receipts %}{% set method_key = method_keys.get(r.payment_method) %}<p>{{ r.date|business_date }} — {{ r.customer }} — {{ '{:,.0f}'.format(r.amount) }} {{ t('common.som') }} — <b>{{ t(method_key) if method_key else payment_methods.get(r.payment_method, 'Naqd') }}</b></p>{% else %}<p>{{ t('cash.worker.no_receipts') }}</p>{% endfor %}</div>
+</main></div>{% endblock %}

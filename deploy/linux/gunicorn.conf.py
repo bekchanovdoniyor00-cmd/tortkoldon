@@ -1,0 +1,15 @@
+wsgi_app = "linux_wsgi:create_application()"
+bind = "127.0.0.1:8000"
+workers = 1
+worker_class = "gthread"
+threads = 8
+timeout = 120
+graceful_timeout = 60
+keepalive = 5
+forwarded_allow_ips = "127.0.0.1"
+preload_app = True
+daemon = False
+accesslog = None
+errorlog = "-"
+loglevel = "info"
+umask = 0o027

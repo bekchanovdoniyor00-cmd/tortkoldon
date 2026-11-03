@@ -1,0 +1,41 @@
+{% extends 'base.html' %}{% block content %}
+<h1>{{ t('warehouse.title') }}</h1>
+<section class="panel"><h2>{{ t('warehouse.wheat_stock') }}</h2><h2>{{ '%.2f'|format(wheat_stock/1000) }} {{ t('common.ton') }}</h2></section>
+<section class="panel">
+<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+<h2 style="margin:0">{{ t('warehouse.products_stock') }}</h2>
+{% if current_user.role=='buxgalter' and opening_products %}<button type="button" id="toggle-opening-stock" aria-expanded="false" aria-controls="opening-stock-form" style="background:#13834b;color:white;padding:8px 13px;border:0;border-radius:8px;font-weight:600">{{ t('warehouse.add_stock') }}</button>{% endif %}
+</div>
+{% if current_user.role=='buxgalter' %}
+{% if opening_products %}
+<form id="opening-stock-form" method="post" class="form-grid" style="display:none;margin:16px 0;padding:14px;border:1px solid #dce8df;border-radius:10px">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="opening_product_stock">
+<label>{{ t('common.date') }}<input type="date" name="date" value="{{ today }}" max="2099-12-31" required></label>
+<label>{{ t('warehouse.product_type') }}<select name="product" id="opening-stock-product" required><option value="">{{ t('common.select') }}</option>{% for product in opening_products %}<option value="{{ product }}">{{ product }}</option>{% endfor %}</select></label>
+<label id="opening-stock-kg-field">{{ t('warehouse.quantity_kg') }}<input type="number" name="qty_kg" min="0.01" step="0.01" required></label>
+<div id="opening-stock-bag-fields" class="wide panel" style="display:none;margin:0">
+<h3 style="margin-top:0">{{ t('warehouse.opening_bag_stock') }}</h3>
+<div class="form-grid">
+<label>{{ t('warehouse.bag_25') }} — {{ t('warehouse.opening_bag_count') }}<input type="number" name="bag_25_count" min="0" step="1" value="0"></label>
+<label>{{ t('warehouse.bag_50') }} — {{ t('warehouse.opening_bag_count') }}<input type="number" name="bag_50_count" min="0" step="1" value="0"></label>
+<p class="wide" style="margin:0">{{ t('warehouse.total_kg') }}: <output id="opening-stock-total-kg" aria-live="polite">0</output> {{ t('common.kg') }}</p>
+</div>
+</div>
+<label class="wide">{{ t('common.note') }}<input type="text" name="note" maxlength="500"></label>
+<div class="wide"><button type="submit">{{ t('common.confirm') }}</button></div>
+</form>
+{% else %}<p style="margin-top:14px;color:#52665e">{{ t('warehouse.all_openings_exist') }}</p>{% endif %}
+{% endif %}
+<div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>{{ t('common.product') }}</th><th>{{ t('warehouse.stock_kg') }}</th><th>{{ t('warehouse.bag_25') }}</th><th>{{ t('warehouse.bag_50') }}</th></tr></thead><tbody>{% for name, qty in stocks.items() %}<tr><td>{{ name }}</td><td>{{ '%.2f'|format(qty) }}</td><td>{{ bagged_stocks[name][25] if name in bagged_stocks else '—' }}</td><td>{{ bagged_stocks[name][50] if name in bagged_stocks else '—' }}</td></tr>{% endfor %}</tbody></table></div>
+<p class="muted">{{ t('sales.stock_note') }}</p>
+</section>
+<section class="panel"><h2>{{ t('warehouse.opening_stock') }}</h2><div class="table-wrap"><table><thead><tr><th>{{ t('common.date') }}</th><th>{{ t('common.product') }}</th><th>{{ t('warehouse.quantity_kg') }}</th><th>{{ t('common.note') }}</th><th>{{ t('common.user') }}</th></tr></thead><tbody>{% for row in stock_openings %}<tr><td>{{ row.stock_date|business_date }}</td><td>{{ row.product }}</td><td>{{ '%.2f'|format(row.qty_kg) }}</td><td>{% if row.opening_bags %}{{ t('warehouse.bag_25') }} × {{ row.bag_25_count }}; {{ t('warehouse.bag_50') }} × {{ row.bag_50_count }}{% if row.note %}<br>{% endif %}{% endif %}{{ row.note or ('—' if not row.opening_bags else '') }}</td><td>{{ row.entered_by_name }}</td></tr>{% else %}<tr><td colspan="5">{{ t('warehouse.no_opening_stock') }}</td></tr>{% endfor %}</tbody></table></div></section>
+{% if current_user.role=='buxgalter' and opening_products %}<script>
+const openingToggle=document.getElementById('toggle-opening-stock'),openingForm=document.getElementById('opening-stock-form');
+openingToggle.addEventListener('click',()=>{const open=openingForm.style.display==='none';openingForm.style.display=open?'grid':'none';openingToggle.setAttribute('aria-expanded',String(open))});
+const openingProduct=document.getElementById('opening-stock-product'),openingKgField=document.getElementById('opening-stock-kg-field'),openingKgInput=openingKgField.querySelector('input'),openingBagFields=document.getElementById('opening-stock-bag-fields'),openingBag25=openingForm.elements.namedItem('bag_25_count'),openingBag50=openingForm.elements.namedItem('bag_50_count'),openingTotal=document.getElementById('opening-stock-total-kg'),openingBaggedProducts={{ opening_bagged_products|tojson }};
+function updateOpeningStockFields(){const bagged=openingBaggedProducts.includes(openingProduct.value);openingKgField.style.display=bagged?'none':'block';openingKgInput.required=!bagged;openingKgInput.disabled=bagged;openingBagFields.style.display=bagged?'block':'none';openingBag25.disabled=!bagged;openingBag50.disabled=!bagged}
+function updateOpeningStockTotal(){openingTotal.value=(25*Number(openingBag25.value||0)+50*Number(openingBag50.value||0)).toLocaleString('uz-UZ')}
+openingProduct.addEventListener('change',updateOpeningStockFields);openingBag25.addEventListener('input',updateOpeningStockTotal);openingBag50.addEventListener('input',updateOpeningStockTotal);updateOpeningStockFields();updateOpeningStockTotal();
+</script>{% endif %}
+{% endblock %}

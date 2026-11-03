@@ -1,0 +1,75 @@
+{% extends 'base.html' %}
+{% from '_pagination.html' import render_pagination with context %}
+{% block content %}
+<h1>{{ t('production.title') }}</h1>
+{% if current_user.role == 'umid' %}<p><a href="{{ url_for('worker_sales') }}" style="display:inline-block;padding:10px 15px;background:#08765a;color:white;border-radius:9px;text-decoration:none">{{ t('production.back') }}</a></p>{% endif %}
+<section class="panel">
+<h2>{{ t('production.wheat_stock') }} {{ '%.3f'|format(stock/1000) }} {{ t('common.ton') }}</h2>
+<p class="muted">{{ t('production.stock_note') }}Sara, Yevro, Zar Bug‘doy {{ t('common.and') }} Robiya{{ t('production.named_bagged_tail') }}Qora un{{ t('production.flour_other_tail') }} {{ t('common.kg') }} hisobida qoladi.</p>
+{% if current_user.role == 'umid' %}
+<form method="post" class="form-grid">
+<input type="hidden" name="operation_token" value="{{ production_token() }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>{{ t('common.date') }}<input type="date" name="date"></label>
+<label>{{ t('production.wheat_unit') }}<select name="unit"><option value="tonna">{{ t('common.ton')|capitalize }}</option><option value="kg">{{ t('production.kilogram') }}</option></select></label>
+<label>{{ t('production.raw_wheat') }}<input type="number" name="raw_wheat" min="0.001" step="0.001" required></label>
+<label>{{ t('production.cleaned_wheat') }}<input type="number" name="cleaned_wheat" min="0.001" step="0.001" required></label>
+<div id="bagged-flour-section" class="wide panel" style="margin:0">
+<h3 style="margin:0">{{ t('production.bagged_products') }}</h3>
+<p>{{ t('production.bagged_note') }}</p>
+<div class="bagged-table-wrap"><table class="bagged-production-table"><thead><tr><th>{{ t('common.product') }}</th><th>{{ t('production.bag_count_25') }}</th><th>{{ t('production.bag_count_50') }}</th><th>{{ t('production.total_kg') }}</th></tr></thead><tbody>
+{% for product in bagged_flour_products %}
+<tr data-bagged-product="{{ product }}">
+<th scope="row">{{ product }}</th>
+{% for size in (25,50) %}
+<td><input type="hidden" name="bag_product" value="{{ product }}"><input type="hidden" name="bag_kg" value="{{ size }}"><label class="bag-count-label"><span>{{ size }} {{ t('common.kg') }} {{ t('production.bag_count_label') }}</span><input type="number" name="bag_count" min="0" step="1" value="0" inputmode="numeric" data-bag-size="{{ size }}" aria-label="{{ product }} {{ size }} {{ t('common.kg') }} {{ t('production.bag_count_label') }}"></label></td>
+{% endfor %}
+<td class="bagged-product-total" aria-live="polite">0 kg</td>
+</tr>
+{% endfor %}
+</tbody><tfoot><tr><th colspan="3">{{ t('production.all_products_total') }}</th><td id="bagged-total" aria-live="polite">0 {{ t('common.kg') }}</td></tr></tfoot></table></div>
+</div>
+<label>Qora un {{ t('production.flour_produced') }}<input type="number" name="flour_4" min="0" step="0.01" value="0" required></label>
+<label>{{ t('production.bran_produced') }}Kepak{{ t('production.byproduct_kg') }}<input type="number" name="bran_kg" min="0" step="0.01" value="0" required></label>
+<label>{{ t('production.bran_produced') }}Muchka{{ t('production.byproduct_kg') }}<input type="number" name="muchka_kg" min="0" step="0.01" value="0" required></label>
+<label>Telashka atxod{{ t('production.byproduct_kg') }}<input type="number" name="telashka_kg" min="0" step="0.01" value="0" required></label>
+<label class="wide">{{ t('common.note') }}<input name="note"></label><button>{{ t('production.save') }}</button>
+</form>
+{% endif %}
+</section>
+<section class="panel">
+<h2>{{ t('production.history') }}</h2>
+<div style="overflow-x:auto"><table><thead><tr><th>{{ t('common.date') }}</th><th>{{ t('production.raw_tons') }}</th><th>{{ t('production.cleaned_tons') }}</th><th>{{ t('production.loss_tons') }}</th><th>{{ t('production.loss_percent') }}</th><th>{{ t('production.flour_kg') }}</th><th>{{ t('production.bags') }}</th><th>{{ t('production.bran_kg') }}</th><th>{{ t('production.muchka_kg') }}</th><th>{{ t('production.telashka_kg') }}</th></tr></thead><tbody>
+{% for r in rows %}{% set raw = r.raw_wheat_kg if r.raw_wheat_kg is not none else r.wheat_kg %}
+<tr><td>{{ r.date|business_date }}</td><td>{{ '%.3f'|format(raw/1000) }}</td><td>{{ '%.3f'|format(r.wheat_kg/1000) }}</td><td>{{ '%.3f'|format((raw-r.wheat_kg)/1000) }}</td><td>{{ '%.2f'|format((raw-r.wheat_kg)*100/raw if raw else 0) }}%</td><td>{{ '%.2f'|format(r.flour_kg) }}</td><td>{% for line in bag_lines.get(r.id,[]) %}{{ line.product }} {{ line.bag_kg }} {{ t('common.kg') }} × {{ line.bag_count }} ({{ line.qty_kg }} {{ t('common.kg') }}){% if not loop.last %}<br>{% endif %}{% else %}{{ t('production.kg_only') }}{% endfor %}</td><td>{{ '%.2f'|format(r.bran_kg) }}</td><td>{{ '%.2f'|format(r.muchka_kg or 0) }}</td><td>{{ '%.2f'|format(r.telashka_kg or 0) }}</td></tr>
+{% else %}<tr><td colspan="10">{{ t('production.no_history') }}</td></tr>{% endfor %}
+</tbody></table></div>
+{{ render_pagination(pagination) }}
+</section>
+<style>
+#bagged-flour-section .bagged-table-wrap{overflow-x:auto}
+#bagged-flour-section .bagged-production-table{width:100%;border-collapse:collapse}
+#bagged-flour-section .bagged-production-table th,#bagged-flour-section .bagged-production-table td{padding:9px 10px;text-align:left;border-bottom:1px solid #e3ebe5}
+#bagged-flour-section .bagged-production-table tfoot th,#bagged-flour-section .bagged-production-table tfoot td{font-weight:700;border-bottom:0}
+#bagged-flour-section .bag-count-label{display:grid;gap:4px;font-size:12px;color:#52665e}
+#bagged-flour-section .bag-count-label input{width:100%;min-width:90px}
+@media(max-width:700px){
+#bagged-flour-section .bagged-table-wrap{overflow:visible}
+#bagged-flour-section .bagged-production-table,#bagged-flour-section .bagged-production-table tbody{display:block;width:100%}
+#bagged-flour-section .bagged-production-table thead{display:none}
+#bagged-flour-section .bagged-production-table tbody tr{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0;padding:12px;border:1px solid #dce8df;border-radius:10px}
+#bagged-flour-section .bagged-production-table tbody th{grid-column:1/-1;padding:0 0 6px;border:0;font-size:16px}
+#bagged-flour-section .bagged-production-table tbody td{padding:0;border:0}
+#bagged-flour-section .bagged-production-table tbody td:last-child{grid-column:1/-1;padding-top:5px;font-weight:700}
+#bagged-flour-section .bag-count-label input{min-width:0}
+#bagged-flour-section .bagged-production-table tfoot{display:table;width:100%}
+}
+</style>
+<script>
+(()=>{const section=document.getElementById('bagged-flour-section');if(!section)return;const kgLabel={{ t('common.kg')|tojson }};
+const total=document.getElementById('bagged-total');
+function update(){let all=0;section.querySelectorAll('[data-bagged-product]').forEach(row=>{let productTotal=0;row.querySelectorAll('[data-bag-size]').forEach(input=>{const count=Number(input.value||0);productTotal+=Number(input.dataset.bagSize)*count});all+=productTotal;row.querySelector('.bagged-product-total').textContent=productTotal.toLocaleString('uz-UZ')+' '+kgLabel});total.textContent=all.toLocaleString('uz-UZ')+' '+kgLabel}
+section.querySelectorAll('[data-bag-size]').forEach(input=>input.addEventListener('input',update));
+update();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,46 @@
+{% extends 'base.html' %}
+{% macro amount(value) %}{{ '{:,.2f}'.format(value).replace(',', ' ') }}{% endmacro %}
+{% macro history_table(rows) %}
+<table><thead><tr><th>Sana</th><th>To‘lov turi</th><th>Sotuv</th><th>Joriy telefon</th><th>Summa</th><th>Qabul qilgan tomon</th><th>Izoh</th></tr></thead><tbody>
+{% for r in rows %}<tr><td>{{ r.date|business_date }}</td><td>{{ {'initial':'Boshlang‘ich to‘lov','receipt':'Keyingi qarz to‘lovi','legacy':'Eski to‘lov (FIFO)'}.get(r.kind,r.kind) }}</td><td>{{ r.sale_id if r.sale_id is not none else 'Aniq bog‘lanmagan' }}</td><td>{{ r.phone or 'Ko‘rsatilmagan' }}</td><td>{{ amount(r.amount) }}</td><td>{{ {'accountant':'Buxgalter','worker':'Xodim','sale':'Sotuv yozuvi','legacy':'Eski to‘lov yozuvi'}.get(r.recipient,r.recipient) }}</td><td>{{ r.note or '' }}</td></tr>{% else %}<tr><td colspan="7">To‘lov yo‘q.</td></tr>{% endfor %}
+</tbody></table>
+{% endmacro %}
+{% block content %}
+<h1>Xaridor hisob-kitobi: {{ customer }}</h1><button onclick="window.print()">Chop etish</button>
+<p>Hisoblar ishonchli xaridor kartasi va audit tarixidagi aniq ism-telefon bog‘lanishi orqali ko‘rsatiladi. Tarixiy sotuv hamda nakladnoy yozuvlari o‘zgartirilmagan; joriy rekvizitlar shu xaridorning hisobida ko‘rsatiladi. Sotuv daromadi qarz qaytimi hisobiga oshmaydi. Qabul qilingan pul kassa qoldig‘i emas.</p>
+{% if groups|length > 1 %}<p class="flash error">Bir xil ismga turli telefonlar mos keladi. Quyidagi guruhlar bitta xaridor deb birlashtirilmadi; umumiy qo‘shma qarz chiqarilmadi.</p>{% endif %}
+{% for group in groups %}
+{% set t = group.totals %}
+<section class="panel customer-group" data-phone="{{ t.phone }}">
+<h2>{{ t.customer }} — telefon: {% for phone in group.phones %}{{ phone or 'Ko‘rsatilmagan' }}{% if not loop.last %}; {% endif %}{% endfor %}</h2>
+<p>Sotuv daromadi: <strong class="customer-sales">{{ amount(t.sales_revenue) }}</strong> so‘m · Eski qarz: <strong class="customer-opening">{{ amount(t.opening_debt) }}</strong> so‘m.</p>
+<p>Jami majburiyat: <strong class="customer-obligations">{{ amount(t.sales_revenue + t.opening_debt) }}</strong> so‘m · Qabul qilingan pul: <strong class="customer-received">{{ amount(t.received) }}</strong> so‘m · Qarz qoldig‘i: <strong class="customer-debt">{{ amount(t.debt) }}</strong> so‘m.</p>
+{% if t.linked_excess or t.legacy_excess %}<p>Ortiqcha to‘lov: <strong class="customer-excess">{{ amount(t.linked_excess + t.legacy_excess) }}</strong> so‘m. Boshqa sotuv yoki xaridorga avtomatik o‘tkazilmadi.</p>{% endif %}
+<h3>Faol sotuvlar</h3>
+<table><thead><tr><th>Sana</th><th>Mahsulot</th><th>Joriy telefon</th><th>Sotuv summasi</th><th>Boshlang‘ich to‘lov</th><th>Keyingi to‘lovlar</th><th>Eski to‘lovdan FIFO</th><th>To‘langan jami</th><th>Qoldiq</th><th>Nakladnoy</th></tr></thead><tbody>
+{% for r in group.sales %}{% set c = r.calculation %}<tr data-sale-id="{{ r.id }}"><td>{{ r.date|business_date }}</td><td>{{ r.product }}</td><td>{{ r.customer_phone }}</td><td>{{ amount(c.amount) }}</td><td>{{ amount(c.initial_paid) }}</td><td>{{ amount(c.linked_paid) }}</td><td>{{ amount(c.legacy_applied) }}</td><td>{{ amount(c.initial_paid + c.linked_paid + c.legacy_applied) }}</td><td class="sale-balance">{{ amount(c.balance) }}</td><td>{% if r.invoice_id %}<a href="{{ url_for('invoice_print',invoice_id=r.invoice_id) }}">№{{ r.invoice_number }}</a>{% endif %}</td></tr>{% else %}<tr><td colspan="10">Faol sotuv yo‘q.</td></tr>{% endfor %}
+</tbody></table>
+<h3>Eski qarz majburiyatlari</h3>
+<table><thead><tr><th>Sana</th><th>Joriy telefon</th><th>Eski qarz summasi</th><th>Taqsimlangan eski to‘lov</th><th>Qoldiq</th><th>Muddat</th></tr></thead><tbody>
+{% for r in group.opening %}{% set c = r.calculation %}<tr data-opening-id="{{ r.id }}"><td>{{ r.date|business_date }}</td><td>{{ r.customer_phone }}</td><td>{{ amount(c.amount) }}</td><td>{{ amount(c.legacy_applied) }}</td><td class="opening-balance">{{ amount(c.balance) }}</td><td>{{ r.due_date|business_date }}</td></tr>{% else %}<tr><td colspan="6">Eski qarz yo‘q.</td></tr>{% endfor %}
+</tbody></table>
+<h3>To‘lovlar tarixi</h3><p>Har bir to‘lov bir marta ko‘rsatiladi. Buxgalter qaydi keyingi to‘lovning qabul qiluvchisini bildiradi, qo‘shimcha tushum emas.</p>{{ history_table(group.history) }}
+</section>
+{% else %}<p>Ushbu ism bo‘yicha faol majburiyat topilmadi.</p>{% endfor %}
+{% if unallocated_legacy %}<section class="panel" id="unallocated-legacy"><h2>Aniq xaridorga taqsimlanmagan eski to‘lovlar</h2><p>Bu pul korxona tushumida bir marta hisoblangan. Aniq bog‘lanish bo‘lmagani uchun yuqoridagi guruhlar qarzidan ayirilmadi.</p><table><tr><th>Sana</th><th>Yozuv</th><th>Summa</th><th>Izoh</th></tr>{% for r in unallocated_legacy %}<tr><td>{{ r.date|business_date }}</td><td>{{ r.id }}</td><td>{{ amount(r.amount) }}</td><td>{{ r.note or '' }}</td></tr>{% endfor %}</table></section>{% endif %}
+{% if exception_history %}<section class="panel" id="historical-exceptions"><h2>Faol majburiyatga bog‘lanmagan tarixiy pul</h2><p>Bekor qilingan sotuvlar faol sotuv va qarzga kirmaydi. Quyidagi pul korxona tushumida saqlangan; avtomatik qaytarilgan yoki boshqa qarzga o‘tkazilgan deb hisoblanmadi.</p>{{ history_table(exception_history) }}</section>{% endif %}
+{% if financial_warnings %}
+<section class="panel" id="financial-warnings"><h2>Hisobni tekshirish zarur</h2><ul>
+{% set messages = {
+'same_name_multiple_phones':'Bir xil ismli, turli telefonli guruhlar alohida saqlandi.',
+'legacy_identity_ambiguous':'Eski to‘lovning xaridori noaniq. Taxminiy taqsimot bajarilmadi.',
+'legacy_without_obligation':'Eski to‘lovga mos faol majburiyat topilmadi.',
+'legacy_fifo_not_explicit_link':'Eski to‘lov FIFO bo‘yicha hisoblandi: sana, bir kunda eski qarz avval, so‘ng yozuv IDsi. Bu tarixiy sotuvga aniq bog‘lanish isboti emas.',
+'cancelled_sale_initial_payment':'Bekor qilingan sotuvda boshlang‘ich to‘lov saqlangan.',
+'receipt_without_active_sale':'Keyingi to‘lov faol sotuvga bog‘lanmagan.',
+'accountant_receipt_mismatch':'Buxgalter qaydi asosiy to‘lovga mos emas; asosiy to‘lov bir marta sanaldi.',
+'accountant_receipt_without_source':'Buxgalter qaydiga mos asosiy to‘lov topilmadi; qo‘shimcha tushum sanalmadi.',
+'sale_overpaid':'Sotuvga bog‘langan to‘lov majburiyatdan ortiq; boshqa qarzga o‘tkazilmadi.'} %}
+{% for w in financial_warnings %}<li>{{ messages.get(w.code,'Moliyaviy yozuvni tekshirish zarur.') }}{% if w.sale_id is defined %} Sotuv №{{ w.sale_id }}.{% endif %}{% if w.receipt_id is defined %} To‘lov №{{ w.receipt_id }}.{% endif %}{% if w.payment_ids is defined %} Eski to‘lovlar: {{ w.payment_ids|join(', ') }}.{% endif %}</li>{% endfor %}
+</ul></section>{% endif %}
+{% endblock %}

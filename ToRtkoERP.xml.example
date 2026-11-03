@@ -1,0 +1,25 @@
+<service>
+  <id>ToRtkoERP</id>
+  <name>To‘rtko‘ldonmaxsuloti ERP</name>
+  <description>ERP hosted by Waitress on localhost with graceful stop and verified startup checks.</description>
+  <executable>C:\ERP\app\.venv\Scripts\python.exe</executable>
+  <startarguments>C:\ERP\app\windows_service_host.py --config C:\ERP\config\production.json</startarguments>
+  <stopexecutable>C:\ERP\app\.venv\Scripts\python.exe</stopexecutable>
+  <stoparguments>C:\ERP\app\windows_service_host.py --stop --config C:\ERP\config\production.json</stoparguments>
+  <workingdirectory>C:\ERP\app</workingdirectory>
+  <env name="ERP_MODE" value="production" />
+  <env name="ERP_SECRET_FILE" value="C:\ERP\secrets\erp_session_secret.txt" />
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+  <serviceaccount>
+    <prompt>console</prompt>
+    <allowservicelogon>true</allowservicelogon>
+  </serviceaccount>
+  <stoptimeout>90sec</stoptimeout>
+  <onfailure action="restart" delay="10 sec" />
+  <onfailure action="restart" delay="30 sec" />
+  <onfailure action="none" />
+  <resetfailure>1 hour</resetfailure>
+  <logpath>C:\ERPLogs\winsw</logpath>
+  <log mode="roll" />
+</service>

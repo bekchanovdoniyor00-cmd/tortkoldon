@@ -1,0 +1,57 @@
+{% extends 'base.html' %}{% from '_pagination.html' import render_pagination with context %}{% block content %}
+<style>
+.wd{max-width:1250px;margin:25px auto;padding:0 16px;font-family:system-ui,sans-serif;color:#173f35}
+.wd-head{background:linear-gradient(115deg,#075743,#13866c);color:#fff;padding:25px;border-radius:20px}
+.wd-head h1{margin:0;font-size:26px;color:#fff}.wd-head p{margin:8px 0 0;color:#d7f5e9}
+.wd-nav{display:flex;flex-wrap:wrap;gap:9px;padding:18px 0}
+.wd-nav a{background:#fff;border:1px solid #dbe8e2;padding:11px 14px;border-radius:12px;text-decoration:none;color:#18543f;font-weight:650}
+.wd-nav a.active{background:#e1f5ec;border-color:#a7ddc5}
+.wd-card{background:#fff;border:1px solid #e0e8e3;border-radius:18px;padding:24px;box-shadow:0 10px 30px #123b3010}
+.wd-intro{color:#577269;margin:8px 0 20px}
+.wd-table{width:100%;border-collapse:collapse}.wd-table th{text-align:left;background:#f1f6f3;color:#265344}
+.wd-table td,.wd-table th{padding:14px 12px;border-bottom:1px solid #e7eee9}
+.wd-pay{background:#0c7558;border:0;color:white;padding:10px 16px;border-radius:10px;font-weight:650;cursor:pointer}
+.wd-form{display:none;background:#f4faf7;padding:17px;border:1px solid #c9e6d8;border-radius:12px;margin-top:12px}
+.wd-form.open{display:block}.wd-form input{width:180px;max-width:100%;padding:11px;border:1px solid #b9d4c7;border-radius:9px}
+.wd-note{font-size:13px;color:#61776d;margin-top:9px}
+@media(max-width:650px){.wd-card{padding:13px}.wd-table td,.wd-table th{padding:10px 5px}.wd-head{padding:18px}}
+</style>
+{% set payment_method_keys = {'naqd':'common.cash','plastik':'common.card','hisob':'common.bank'} %}
+<div class="wd">
+<header class="wd-head"><h1>{{ role_name }} — {{ t('employee.personal_account') }}</h1><p>TO‘RTKO‘L DON MAHSULOTI · {{ t('cash.worker.panel') }}</p></header>
+<nav class="wd-nav">
+<a href="{{ url_for('worker_sales') }}">{{ t('cash.worker.nav.home') }}</a>
+<a href="{{ url_for('worker_sale_form') }}">{{ t('cash.worker.nav.new_sale') }}</a>
+<a class="active" href="{{ url_for('worker_debts') }}">{{ t('cash.worker.nav.debt_payment') }}</a>
+<a href="{{ url_for('worker_archive') }}">{{ t('cash.worker.nav.archive') }}</a>
+<a href="{{ url_for('worker_customers_page') }}">{{ t('cash.worker.nav.customers') }}</a>
+<a href="{{ url_for('worker_cash_page') }}">{{ t('cash.worker.nav.cash') }}</a>
+</nav>
+<section class="wd-card">
+<h2>💳 {{ t('cash.worker.nav.debt_payment') }}</h2>
+<p class="wd-intro">{{ t('employee.payment_intro') }}</p>
+<table class="wd-table"><thead><tr><th>{{ t('common.customer') }}</th><th>{{ t('employee.total_debt') }}</th><th>{{ t('common.action') }}</th></tr></thead><tbody>
+{% for item in debt_groups %}
+<tr><td><strong>{{ item.customer }}</strong><br><small>{{ item.phone }}</small></td>
+<td><strong>{{ '{:,.0f}'.format(item.debt) }} {{ t('common.som') }}</strong>{% if item.legacy_estimated_amount %}<br><small>{{ t('debts.excess_amount') }} {{ '{:,.0f}'.format(item.legacy_estimated_amount) }} {{ t('employee.unverified_fifo') }}</small>{% endif %}{% if item.payment_blocked %}<br><small>{{ t('employee.ambiguous_payment_blocked') }}</small>{% endif %}</td>
+<td><button type="button" class="wd-pay" {% if item.payment_blocked %}disabled{% else %}onclick="toggleDebtForm('debt-{{ loop.index }}')"{% endif %}>{{ t('employee.pay_action') }}</button>
+<div class="wd-form" id="debt-{{ loop.index }}">
+<form method="post" action="{{ url_for('worker_group_receipt') }}" data-payment-confirm="{{ t('employee.confirm_payment') }}" onsubmit="return confirm(this.dataset.paymentConfirm)">
+<input type="hidden" name="operation_token" value="{{ worker_group_receipt_token(item.customer, item.phone) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="customer" value="{{ item.customer }}">
+<input type="hidden" name="customer_phone" value="{{ item.phone }}">
+<label>{{ t('employee.payment_amount') }}<br><input name="amount" type="number" min="0.01" max="{{ '%.2f'|format(item.debt) }}" step="0.01" required placeholder="{{ t('employee.amount_example') }}"></label>
+<label style="display:block;margin:12px 0 4px">{{ t('employee.payment_method') }}</label>
+<select name="payment_method" required style="padding:11px;border:1px solid #b9d4c7;border-radius:9px;max-width:100%;background:white">
+<option value="naqd">💵 {{ t('common.cash') }}</option><option value="plastik">💳 {{ t('common.card') }}</option><option value="hisob">🏦 {{ t('employee.bank_payment') }}</option>
+</select>
+<p class="wd-note">{{ t('employee.current_debt') }} {{ '{:,.0f}'.format(item.debt) }} {{ t('common.som') }}. {{ t('employee.oldest_debt_first') }}</p>
+<button class="wd-pay" type="submit">{{ t('employee.confirm_payment_button') }}</button>
+</form></div></td></tr>
+{% else %}<tr><td colspan="3">{{ t('employee.no_debtors') }}</td></tr>{% endfor %}
+</tbody></table>
+{{ render_pagination(debt_groups_pagination) }}
+</section></div>
+<script>function toggleDebtForm(id){let el=document.getElementById(id);el.classList.toggle('open');}</script>
+{% endblock %}
