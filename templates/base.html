@@ -102,9 +102,9 @@
 <header class="topbar">
 <div class="topbar-left">
   {% if session.get('user_id') and session.get('role') not in ('umid','maxmud','ishchi') %}
-  <button type="button" class="menu-toggle" onclick="toggleMenu()" aria-label="{{ t('nav.menu_open') }}"><i data-lucide="menu"></i></button>
+  <button type="button" class="menu-toggle" onclick="toggleMenu()" aria-label="{{ t('nav.menu_open') }}">☰</button>
   {% endif %}
-  <span class="topbar-brand"><i data-lucide="sprout"></i> <span class="brand-text">{{ t('company.name') }}</span></span>
+  <span class="topbar-brand">🌾 <span class="brand-text">{{ t('company.name') }}</span></span>
   <span class="top-date" id="top-date"></span>
 </div>
 
@@ -117,24 +117,16 @@
   <form class="language-switch" method="post" action="{{ url_for('set_language') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="next" value="{{ request.full_path }}">
-    <label for="ui-language"><i data-lucide="globe" style="width:14px;height:14px;"></i></label>
+    <label for="ui-language"><span class="lang-label-text">{{ t('language.select') }}</span></label>
     <select id="ui-language" name="language" onchange="this.form.submit()">
       <option value="uz-Latn" {{ 'selected' if ui_language == 'uz-Latn' else '' }}>{{ t('language.latin') }}</option>
       <option value="uz-Cyrl" {{ 'selected' if ui_language == 'uz-Cyrl' else '' }}>{{ t('language.cyrillic') }}</option>
     </select>
-    <button type="submit" class="lang-submit-btn" aria-label="{{ t('language.apply') }}"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i></button>
+    <button type="submit" class="lang-submit-btn" aria-label="{{ t('language.apply') }}">↻</button>
   </form>
 
   {% if session.get('user_id') %}
-  <div class="user-chip">
-    <span class="user-name"><strong>{{ session.get('username') }}</strong></span>
-    <span class="user-role-badge">{{ t('role.' ~ session.get('role')) }}</span>
-    <a href="{{ url_for('change_password') }}" class="user-pwd-link" title="{{ t('nav.password') }}"><i data-lucide="key-round" style="width:14px;height:14px;"></i></a>
-    <form method="post" action="{{ url_for('logout') }}">
-      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-      <button type="submit" title="{{ t('nav.logout') }}"><i data-lucide="log-out" style="width:14px;height:14px;"></i></button>
-    </form>
-  </div>
+  <div class="user-chip">● <strong>{{ session.get('username') }}</strong> · {{ t('role.' ~ session.get('role')) }} <a href="{{ url_for('change_password') }}" class="user-pwd-link" title="{{ t('nav.password') }}">{{ t('nav.password') }}</a> <form method="post" action="{{ url_for('logout') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button type="submit" title="{{ t('nav.logout') }}">{{ t('nav.logout') }}</button></form></div>
   {% endif %}
 </div>
 </header>
@@ -144,7 +136,7 @@
 {% block content %}{% endblock %}
 </main>
 
-<footer>{{ t('footer') }}</footer>
+<footer>{{ t('footer').replace(' · Sinov versiyasi', '').replace(' · Синов версияси', '') }}</footer>
 </div>
 
 {% if session.get('user_id') and session.get('role') not in ('umid','maxmud','ishchi') %}
@@ -240,7 +232,7 @@ window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferredPrompt = e;
     const btn = document.getElementById('pwa-install-btn');
-    if (btn && !isStandaloneMode()) btn.style.display = 'inline-flex';
+    if (btn && !isStandaloneMode() && window.innerWidth <= 768) btn.style.display = 'inline-flex';
 });
 
 function triggerPwaInstall() {

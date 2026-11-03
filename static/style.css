@@ -1737,7 +1737,7 @@ select:focus {
 
 
 /* ========================================================
-   2026 LUCIDE ICONS & FULL RESPONSIVE SUITE (PHONE/TABLET/DESKTOP)
+   LUCIDE ICONS & RESPONSIVE SUITE (PHONE/TABLET/DESKTOP)
    ======================================================== */
 
 .lucide {
@@ -1769,62 +1769,10 @@ select:focus {
     color: #d5aa48;
 }
 
-.topbar-brand {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 700;
-}
-
-.topbar-brand .lucide {
-    width: 20px;
-    height: 20px;
-    color: #047857;
-}
-
 .topbar-right {
     display: flex;
     align-items: center;
     gap: 10px;
-}
-
-.pwa-install-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    background: #ecfdf5;
-    border: 1px solid #a7f3d0;
-    color: #065f46;
-    border-radius: 20px;
-    padding: 6px 12px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.pwa-install-btn:hover {
-    background: #d1fae5;
-    border-color: #6ee7b7;
-}
-
-.user-chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    background: #f1f5f9;
-    padding: 4px 10px;
-    border-radius: 20px;
-    border: 1px solid #e2e8f0;
-}
-
-.user-role-badge {
-    background: #e2e8f0;
-    color: #475569;
-    padding: 2px 7px;
-    border-radius: 10px;
-    font-size: 11px;
-    font-weight: 600;
 }
 
 .sidebar-backdrop {
@@ -1867,54 +1815,46 @@ body.menu-open .sidebar .sidebar-close {
     display: inline-flex;
 }
 
-/* Mobile Bottom Navigation Bar */
-.mobile-bottom-bar {
-    display: none;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    height: 60px;
-    background: #ffffff;
-    border-top: 1px solid var(--line);
-    box-shadow: 0 -2px 14px rgba(15, 23, 42, 0.08);
-    z-index: 100;
-    padding-bottom: env(safe-area-inset-bottom, 0px);
-    justify-content: space-around;
-    align-items: center;
+/* ========================================================
+   DESKTOP (COMPUTER) STYLES: > 768px
+   100% PRESERVES THE ORIGINAL DESKTOP COMPUTER EXPERIENCE
+   ======================================================== */
+body.no-sidebar .app-shell {
+    margin-left: 0 !important;
 }
 
-.mobile-bottom-bar a,
-.mobile-bottom-bar button {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    color: #64748b;
-    text-decoration: none;
-    font-size: 10px;
-    font-weight: 600;
-    background: none;
-    border: 0;
-    padding: 6px 0;
-    height: 100%;
-    gap: 3px;
-    cursor: pointer;
+@media (min-width: 769px) {
+    /* PWA install button NEVER shows on desktop computer */
+    .pwa-install-btn {
+        display: none !important;
+    }
+    .mobile-bottom-bar {
+        display: none !important;
+    }
+    .menu-toggle {
+        display: none !important;
+    }
+    .sidebar-close {
+        display: none !important;
+    }
+    .sidebar-backdrop {
+        display: none !important;
+    }
+    .language-switch label {
+        display: inline !important;
+    }
+    .language-switch button,
+    .lang-submit-btn {
+        display: inline-block !important;
+    }
+    .top-date {
+        display: inline !important;
+    }
 }
 
-.mobile-bottom-bar a.active,
-.mobile-bottom-bar a:hover,
-.mobile-bottom-bar button:hover {
-    color: #047857;
-}
-
-.mobile-bottom-bar .lucide {
-    width: 20px;
-    height: 20px;
-}
-
-/* TABLET STYLES (769px - 1024px) */
+/* ========================================================
+   TABLET STYLES: 769px - 1024px
+   ======================================================== */
 @media (min-width: 769px) and (max-width: 1024px) {
     .app-shell {
         margin-left: 230px;
@@ -1931,9 +1871,14 @@ body.menu-open .sidebar .sidebar-close {
     .mobile-bottom-bar {
         display: none !important;
     }
+    .pwa-install-btn {
+        display: none !important;
+    }
 }
 
-/* MOBILE STYLES (< 768px) */
+/* ========================================================
+   MOBILE ONLY: <= 768px (SMARTPHONES)
+   ======================================================== */
 @media (max-width: 768px) {
     .app-shell {
         margin-left: 0 !important;
@@ -1958,20 +1903,107 @@ body.menu-open .sidebar .sidebar-close {
         display: inline-flex !important;
         align-items: center;
         justify-content: center;
-        width: 38px;
-        height: 38px;
-        min-width: 38px;
-        border-radius: 8px;
-        background: var(--green);
-        color: #fff;
-        border: 0;
+        width: 36px !important;
+        height: 36px !important;
+        min-width: 36px !important;
+        border-radius: 8px !important;
+        background: var(--green) !important;
+        color: #fff !important;
+        border: 0 !important;
         cursor: pointer;
+        padding: 0 !important;
+        font-size: 16px;
     }
+    header.topbar,
     .topbar {
-        padding: 10px 14px;
-        gap: 8px;
+        display: flex !important;
+        flex-wrap: nowrap !important;
+        align-items: center !important;
+        justify-content: space-between !important;
+        padding: 0 10px !important;
+        height: 56px !important;
+        min-height: 56px !important;
+        max-height: 56px !important;
+        gap: 6px !important;
+        overflow: hidden !important;
+    }
+    .topbar-left {
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        flex-shrink: 1 !important;
+        min-width: 0 !important;
+    }
+    .topbar-brand {
+        font-size: 13px !important;
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
+    }
+    .topbar-brand .brand-text {
+        white-space: nowrap !important;
+        overflow: hidden !important;
+        text-overflow: ellipsis !important;
     }
     .top-date {
+        display: none !important;
+    }
+    .topbar-right {
+        display: flex !important;
+        align-items: center !important;
+        gap: 5px !important;
+        flex-shrink: 0 !important;
+    }
+    .language-switch {
+        display: flex !important;
+        align-items: center !important;
+        gap: 3px !important;
+        margin: 0 !important;
+    }
+    .language-switch label {
+        display: none !important;
+    }
+    .language-switch select {
+        min-height: 34px !important;
+        height: 34px !important;
+        min-width: 65px !important;
+        max-width: 75px !important;
+        padding: 2px 4px !important;
+        font-size: 11px !important;
+        border-radius: 6px !important;
+    }
+    .language-switch button,
+    .language-switch .lang-submit-btn {
+        display: none !important;
+    }
+    .pwa-install-btn {
+        display: inline-flex !important;
+        align-items: center !important;
+        gap: 4px !important;
+        height: 34px !important;
+        padding: 4px 8px !important;
+        font-size: 11px !important;
+        border-radius: 6px !important;
+        background: #059669 !important;
+        color: #ffffff !important;
+        border: 1px solid #047857 !important;
+        white-space: nowrap !important;
+        cursor: pointer !important;
+    }
+    .pwa-install-btn .lucide {
+        width: 14px !important;
+        height: 14px !important;
+    }
+    .user-chip {
+        padding: 2px 7px !important;
+        height: 34px !important;
+        font-size: 11px !important;
+        border-radius: 6px !important;
+        gap: 4px !important;
+        max-width: 85px !important;
+        overflow: hidden !important;
+    }
+    .user-chip a.user-pwd-link {
         display: none !important;
     }
     .cards.overview,
@@ -2025,239 +2057,47 @@ body.menu-open .sidebar .sidebar-close {
         padding: 8px 10px;
         font-size: 12px;
     }
-    .user-chip {
-        font-size: 11px;
-        padding: 3px 8px;
-    }
-    .user-role-badge {
-        display: none;
-    }
     .mobile-bottom-bar {
-        display: flex;
-    }
-}
-
-@media (max-width: 480px) {
-    .pwa-btn-label {
-        display: none;
-    }
-    .pwa-install-btn {
-        padding: 6px 8px;
-    }
-    .topbar-brand span {
-        font-size: 12px;
-    }
-}
-
-
-/* ========================================================
-   AUTH & LOGIN PAGE PERFECT SCREEN CENTERING
-   ======================================================== */
-
-body.no-sidebar .app-shell {
-    margin-left: 0 !important;
-}
-
-body.auth-page .app-shell {
-    margin-left: 0 !important;
-    display: flex;
-    flex-direction: column;
-    min-height: 100vh;
-}
-
-body.auth-page main {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 30px 16px;
-    max-width: 100%;
-    margin: 0 auto;
-}
-
-body.auth-page .auth {
-    width: 100%;
-    max-width: 440px;
-    margin: 0 auto;
-    background: #ffffff;
-    border: 1px solid #e2e8f0;
-    border-radius: 16px;
-    padding: 34px 30px;
-    box-shadow: 0 10px 25px -5px rgba(15, 23, 42, 0.08), 0 8px 10px -6px rgba(15, 23, 42, 0.04);
-}
-
-body.auth-page main > div:first-child {
-    text-align: center;
-    margin-bottom: 12px;
-}
-
-body.auth-page main > div:first-child img {
-    max-width: 130px;
-    filter: drop-shadow(0 4px 12px rgba(0, 0, 0, 0.08));
-}
-
-
-/* ========================================================
-   MODERN MOBILE TOPBAR & RESPONSIVE SINGLE-ROW ALIGNMENT
-   ======================================================== */
-.topbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    flex-wrap: nowrap;
-}
-
-.topbar-left {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    flex-shrink: 1;
-    min-width: 0;
-}
-
-.topbar-brand {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    font-weight: 700;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-}
-
-.topbar-right {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    flex-shrink: 0;
-}
-
-.pwa-install-btn {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: #ecfdf5;
-    border: 1px solid #10b981;
-    color: #065f46;
-    border-radius: 20px;
-    padding: 6px 12px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.2s ease;
-}
-
-.pwa-install-btn:hover {
-    background: #d1fae5;
-    border-color: #059669;
-}
-
-@media (max-width: 768px) {
-    header.topbar,
-    .topbar {
         display: flex !important;
-        flex-wrap: nowrap !important;
-        align-items: center !important;
-        justify-content: space-between !important;
-        padding: 0 12px !important;
-        height: 56px !important;
-        min-height: 56px !important;
-        max-height: 56px !important;
-        gap: 8px !important;
-        overflow: hidden !important;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 60px;
+        background: #ffffff;
+        border-top: 1px solid var(--line);
+        box-shadow: 0 -2px 14px rgba(15, 23, 42, 0.08);
+        z-index: 100;
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+        justify-content: space-around;
+        align-items: center;
     }
-
-    .topbar-left {
-        gap: 8px !important;
-        flex-shrink: 1 !important;
-        min-width: 0 !important;
+    .mobile-bottom-bar a,
+    .mobile-bottom-bar button {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        color: #64748b;
+        text-decoration: none;
+        font-size: 10px;
+        font-weight: 600;
+        background: none;
+        border: 0;
+        padding: 6px 0;
+        height: 100%;
+        gap: 3px;
+        cursor: pointer;
     }
-
-    .menu-toggle {
-        width: 36px !important;
-        height: 36px !important;
-        min-width: 36px !important;
-        padding: 0 !important;
-        display: inline-flex !important;
-        align-items: center !important;
-        justify-content: center !important;
-        border-radius: 8px !important;
+    .mobile-bottom-bar a.active,
+    .mobile-bottom-bar a:hover,
+    .mobile-bottom-bar button:hover {
+        color: #047857;
     }
-
-    .topbar-brand {
-        font-size: 13px !important;
-        white-space: nowrap !important;
-        overflow: hidden !important;
-        text-overflow: ellipsis !important;
-    }
-
-    .topbar-brand .brand-text {
-        white-space: nowrap !important;
-        overflow: hidden !important;
-        text-overflow: ellipsis !important;
-    }
-
-    .top-date {
-        display: none !important;
-    }
-
-    .topbar-right {
-        gap: 6px !important;
-        flex-shrink: 0 !important;
-    }
-
-    .language-switch {
-        gap: 4px !important;
-        margin: 0 !important;
-    }
-
-    .language-switch label {
-        display: none !important;
-    }
-
-    .language-switch select {
-        min-height: 34px !important;
-        height: 34px !important;
-        min-width: 65px !important;
-        max-width: 75px !important;
-        padding: 2px 4px !important;
-        font-size: 11px !important;
-        border-radius: 6px !important;
-    }
-
-    .language-switch button,
-    .language-switch .lang-submit-btn {
-        display: none !important;
-    }
-
-    .pwa-install-btn {
-        height: 34px !important;
-        padding: 4px 8px !important;
-        font-size: 11px !important;
-        border-radius: 6px !important;
-        background: #059669 !important;
-        color: #ffffff !important;
-        border-color: #047857 !important;
-    }
-
-    .pwa-install-btn .lucide {
-        width: 14px !important;
-        height: 14px !important;
-    }
-
-    .user-chip {
-        padding: 2px 8px !important;
-        height: 34px !important;
-        font-size: 11px !important;
-        border-radius: 6px !important;
-        gap: 4px !important;
-    }
-
-    .user-chip .user-role-badge,
-    .user-chip .user-pwd-link {
-        display: none !important;
+    .mobile-bottom-bar .lucide {
+        width: 20px;
+        height: 20px;
     }
 }
 
@@ -2270,12 +2110,6 @@ body.auth-page main > div:first-child img {
     }
     .topbar-brand {
         max-width: 120px;
-    }
-    .user-chip .user-name {
-        max-width: 45px;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
     }
 }
 
