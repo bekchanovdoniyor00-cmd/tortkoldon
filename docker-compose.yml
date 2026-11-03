@@ -1,0 +1,20 @@
+services:
+  erp:
+    build: .
+    container_name: tortkoldon_erp
+    restart: unless-stopped
+    ports:
+      - "5051:5051"
+    environment:
+      - ERP_MODE=production
+      - BEHIND_PROXY=true
+      - PORT=5051
+      - SECRET_KEY=replace_with_a_secure_production_secret_key_12345
+    volumes:
+      - erp_data:/app/data
+      - erp_backups:/app/zaxira_nusxalar
+      - ./tortkuldon.db:/app/tortkuldon.db
+
+volumes:
+  erp_data:
+  erp_backups:

@@ -16,7 +16,12 @@ from ui_translations import DEFAULT_LANGUAGE, LANGUAGES, get_language, translate
 from monthly_reporting import build_monthly_report, build_monthly_workbook
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.path.join(BASE_DIR, 'tortkuldon.db')
+DB_PATH = (
+    os.environ.get('ERP_DATABASE_PATH')
+    or os.environ.get('DATABASE_PATH')
+    or os.environ.get('DB_PATH')
+    or os.path.join(BASE_DIR, 'tortkuldon.db')
+)
 OPENING_WHEAT_METHOD = 'Boshlang‘ich zaxira'
 
 def _business_date(value):
@@ -273,15 +278,24 @@ def service_worker():
 
 # A separate persistent session secret for the isolated test installation.
 SECRET_PATH = os.path.join(BASE_DIR, '.sinov_session_key')
-if os.environ.get('SECRET_KEY'):
+if os.environ.get('ERP_SECRET_KEY'):
+    app.secret_key = os.environ['ERP_SECRET_KEY']
+elif os.environ.get('SECRET_KEY'):
     app.secret_key = os.environ['SECRET_KEY']
+elif os.environ.get('ERP_SECRET_FILE') and os.path.isfile(os.environ['ERP_SECRET_FILE']):
+    with open(os.environ['ERP_SECRET_FILE'], encoding='utf-8') as f:
+        app.secret_key = f.read().strip()
 else:
     if not os.path.exists(SECRET_PATH):
-        with open(SECRET_PATH, 'x', encoding='utf-8') as f:
+        with open(SECRET_PATH, 'w', encoding='utf-8') as f:
             f.write(secrets.token_hex(32))
     with open(SECRET_PATH, encoding='utf-8') as f:
         app.secret_key = f.read().strip()
 app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax')
+
+if os.environ.get('BEHIND_PROXY', 'false').lower() in ('true', '1', 'yes') or os.environ.get('ERP_MODE') == 'production':
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
 
 ROLES = {'rahbar': 'Boshliq', 'buxgalter': 'Buxgalter', 'umid': 'Umid', 'maxmud': 'Maxmud', 'ishchi': 'Eski ishchi'}
 
@@ -4849,7 +4863,8 @@ def sale_payment_allocations(con):
     return result
 
 def make_backup():
-    folder=Path(BASE_DIR)/'zaxira_nusxalar';folder.mkdir(exist_ok=True)
+    folder = Path(os.environ.get('ERP_BACKUP_DIR') or os.environ.get('BACKUP_DIR') or (Path(BASE_DIR) / 'zaxira_nusxalar'))
+    folder.mkdir(parents=True, exist_ok=True)
     destination=folder/('tortkuldon_'+datetime.now().strftime('%Y%m%d_%H%M%S_%f')+'.db')
     source=db()
     try:
@@ -5437,8 +5452,16 @@ def manage_users():
 
 if __name__ == '__main__':
     if not os.path.isfile(DB_PATH):
-        raise SystemExit('Sinov bazasi yo‘q. Avval sinov_nusxa_yaratish.py dasturini ishga tushiring.')
+        clean_template = os.path.join(BASE_DIR, 'data', 'tortkuldon_clean.sqlite')
+        if os.path.isfile(clean_template):
+            os.makedirs(os.path.dirname(os.path.abspath(DB_PATH)), exist_ok=True)
+            shutil.copy2(clean_template, DB_PATH)
     init_db()
-    try: make_backup()
-    except Exception as exc: print('Zaxira yaratishda xatolik:',exc)
-    app.run(host='127.0.0.1', port=int(os.environ.get('PORT', '5051')), debug=False)
+    try:
+        make_backup()
+    except Exception as exc:
+        print('Zaxira yaratishda xatolik:', exc)
+    host = os.environ.get('ERP_HOST') or os.environ.get('HOST', '0.0.0.0')
+    port = int(os.environ.get('ERP_PORT') or os.environ.get('PORT', '5051'))
+    debug = os.environ.get('FLASK_DEBUG', 'false').lower() in ('true', '1', 'yes')
+    app.run(host=host, port=port, debug=debug)
