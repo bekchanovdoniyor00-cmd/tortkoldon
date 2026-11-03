@@ -1,4 +1,4 @@
-{% extends 'base.html' %}{% block content %}<div class="page-title"><div><h1>{{ t('dashboard.title') }}</h1><p>{{ t('dashboard.welcome') }}</p></div><span class="pill">{{ t('dashboard.test_version') }}</span></div>
+{% extends 'base.html' %}{% block content %}<div class="page-title"><div><h1>{{ t('dashboard.title') }}</h1><p>{{ t('dashboard.welcome') }}</p></div></div>
 <div class="cards overview dashboard-card-grid dashboard-inventory" id="omborlar">
 <div class="metric"><span class="metric-icon">🌾</span><div><span>{{ t('dashboard.wheat_stock') }}</span><strong>{{ '{:,.0f}'.format(wheat_stock).replace(',', ' ') }} {{ t('dashboard.unit_kg') }}</strong><small>{{ t('dashboard.raw_stock') }}</small></div></div>
 <div class="metric"><span class="metric-icon">▣</span><div><span>{{ t('dashboard.flour_stock') }}</span><strong>{{ '{:,.0f}'.format(flour_stock).replace(',', ' ') }} {{ t('dashboard.unit_kg') }}</strong><small>{{ t('dashboard.finished_stock') }}</small></div></div>
