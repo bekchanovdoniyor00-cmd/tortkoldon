@@ -25,7 +25,7 @@
 .user-chip form button:hover{color:#065f46;text-decoration-color:#34d399}
 </style>
 </head>
-<body>
+<body class="{% if not session.get('user_id') or session.get('role') in ('umid','maxmud','ishchi') %}no-sidebar{% else %}has-sidebar{% endif %}{% if request.endpoint == 'login' %} auth-page{% endif %}">
 {% if session.get('user_id') and session.get('role') not in ('umid','maxmud','ishchi') %}
 <div class="sidebar-backdrop" id="sidebar-backdrop" onclick="toggleMenu(false)"></div>
 <aside class="sidebar" id="app-sidebar">
