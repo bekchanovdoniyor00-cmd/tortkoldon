@@ -12,7 +12,38 @@
 <link rel="manifest" href="{{ url_for('static', filename='manifest.webmanifest') }}">
 <link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='pwa-icon-192.png') }}">
 <link rel="apple-touch-icon" sizes="180x180" href="{{ url_for('static', filename='pwa-icon-180.png') }}">
-<title>{{ t('company.name') }}</title>
+<title>{{ t('company.name') }} — Rasmiy Boshqaruv Tizimi</title>
+<meta name="description" content="TO‘RTKO‘LDONMAXSULOTI (tortkoldon.uz) — To‘rtko‘l un va don mahsulotlari ishlab chiqarish korxonasi. Bug‘doy qabuli, tegirmon, un savdosi va korxona ERP tizimi.">
+<meta name="keywords" content="tortkoldon, tortkoldon.uz, to'rtko'l don, to'rtko'l don maxsulotlari, тўрткўл дон, un tegirmon, bug'doy, un mahsulotlari, to'rtko'l un, qoraqalpog'iston don">
+<meta name="robots" content="index, follow">
+<link rel="canonical" href="https://tortkoldon.uz/">
+
+<!-- Open Graph / Telegram / Social Preview -->
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://tortkoldon.uz/">
+<meta property="og:site_name" content="TO‘RTKO‘LDONMAXSULOTI">
+<meta property="og:title" content="TO‘RTKO‘LDONMAXSULOTI — Rasmiy Tizim">
+<meta property="og:description" content="To‘rtko‘l un va don mahsulotlari ishlab chiqarish korxonasi rasmiy portali.">
+<meta property="og:image" content="https://tortkoldon.uz/static/company_logo.png">
+
+<!-- Google Schema.org Structured Data -->
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "Organization",
+  "name": "TO‘RTKO‘LDONMAXSULOTI",
+  "alternateName": ["tortkoldon", "tortkoldon.uz", "To'rtko'l don", "To'rtko'l Don Maxsulotlari", "Тўрткўл Дон Маҳсулоти"],
+  "url": "https://tortkoldon.uz/",
+  "logo": "https://tortkoldon.uz/static/company_logo.png",
+  "description": "TO‘RTKO‘LDONMAXSULOTI — To‘rtko‘l don va un mahsulotlari ishlab chiqarish korxonasi.",
+  "address": {
+    "@type": "PostalAddress",
+    "addressLocality": "To'rtko'l",
+    "addressRegion": "Qoraqalpog'iston",
+    "addressCountry": "UZ"
+  }
+}
+</script>
 <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 <script src="{{ url_for('static', filename='lucide.min.js') }}"></script>
 <style>

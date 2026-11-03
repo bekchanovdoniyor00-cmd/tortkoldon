@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Allow: /login
+Allow: /static/
+Disallow: /foydalanuvchilar
+Disallow: /zaxira
+Disallow: /setup
+
+Sitemap: https://tortkoldon.uz/sitemap.xml

@@ -276,6 +276,16 @@ def service_worker():
     return response
 
 
+@app.route('/robots.txt')
+def robots_txt():
+    return send_from_directory(app.static_folder, 'robots.txt', mimetype='text/plain')
+
+
+@app.route('/sitemap.xml')
+def sitemap_xml():
+    return send_from_directory(app.static_folder, 'sitemap.xml', mimetype='application/xml')
+
+
 # A separate persistent session secret for the isolated test installation.
 SECRET_PATH = os.path.join(BASE_DIR, '.sinov_session_key')
 if os.environ.get('ERP_SECRET_KEY'):
