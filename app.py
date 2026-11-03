@@ -975,7 +975,7 @@ def login():
                     COALESCE(user_auth_versions.version,0) AS auth_version
                 FROM users
                 LEFT JOIN user_auth_versions ON user_auth_versions.user_id=users.id
-                WHERE users.username=?''',
+                WHERE users.username=? COLLATE NOCASE''',
                 (request.form.get('username','').strip(),)).fetchone()
         if user and user['active'] and check_password_hash(user['password_hash'], request.form.get('password','')):
             language = get_language(session.get('ui_language'))

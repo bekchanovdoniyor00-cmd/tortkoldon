@@ -9,6 +9,7 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
     const request = event.request;
     if (new URL(request.url).origin !== self.location.origin) return;
+    if (request.method !== 'GET') return;
 
     event.respondWith(
         fetch(request).catch(() => {
