@@ -104,12 +104,12 @@
   {% if session.get('user_id') and session.get('role') not in ('umid','maxmud','ishchi') %}
   <button type="button" class="menu-toggle" onclick="toggleMenu()" aria-label="{{ t('nav.menu_open') }}"><i data-lucide="menu"></i></button>
   {% endif %}
-  <span class="topbar-brand"><i data-lucide="sprout"></i> {{ t('company.name') }}</span>
+  <span class="topbar-brand"><i data-lucide="sprout"></i> <span class="brand-text">{{ t('company.name') }}</span></span>
   <span class="top-date" id="top-date"></span>
 </div>
 
 <div class="topbar-right">
-  <button type="button" id="pwa-install-btn" class="pwa-install-btn" style="display:none;" onclick="triggerPwaInstall()">
+  <button type="button" id="pwa-install-btn" class="pwa-install-btn" onclick="triggerPwaInstall()" title="Ilovani o‘rnatish">
     <i data-lucide="download"></i>
     <span class="pwa-btn-label">Ilova</span>
   </button>
@@ -118,18 +118,18 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="next" value="{{ request.full_path }}">
     <label for="ui-language"><i data-lucide="globe" style="width:14px;height:14px;"></i></label>
-    <select id="ui-language" name="language">
+    <select id="ui-language" name="language" onchange="this.form.submit()">
       <option value="uz-Latn" {{ 'selected' if ui_language == 'uz-Latn' else '' }}>{{ t('language.latin') }}</option>
       <option value="uz-Cyrl" {{ 'selected' if ui_language == 'uz-Cyrl' else '' }}>{{ t('language.cyrillic') }}</option>
     </select>
-    <button type="submit" aria-label="{{ t('language.apply') }}"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i></button>
+    <button type="submit" class="lang-submit-btn" aria-label="{{ t('language.apply') }}"><i data-lucide="refresh-cw" style="width:12px;height:12px;"></i></button>
   </form>
 
   {% if session.get('user_id') %}
   <div class="user-chip">
     <span class="user-name"><strong>{{ session.get('username') }}</strong></span>
     <span class="user-role-badge">{{ t('role.' ~ session.get('role')) }}</span>
-    <a href="{{ url_for('change_password') }}" title="{{ t('nav.password') }}"><i data-lucide="key-round" style="width:14px;height:14px;"></i></a>
+    <a href="{{ url_for('change_password') }}" class="user-pwd-link" title="{{ t('nav.password') }}"><i data-lucide="key-round" style="width:14px;height:14px;"></i></a>
     <form method="post" action="{{ url_for('logout') }}">
       <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" title="{{ t('nav.logout') }}"><i data-lucide="log-out" style="width:14px;height:14px;"></i></button>
@@ -172,6 +172,46 @@
 </nav>
 {% endif %}
 
+<!-- PWA Installation Guide Modal for iOS & Mobile -->
+<div class="pwa-modal-backdrop" id="pwa-modal" onclick="if(event.target===this)closePwaModal()">
+  <div class="pwa-modal-sheet">
+    <div class="pwa-modal-header">
+      <div class="pwa-modal-title">
+        <i data-lucide="smartphone" style="color:#059669;width:22px;height:22px;"></i>
+        <span>Ilovani o‘rnatish</span>
+      </div>
+      <button type="button" class="pwa-modal-close" onclick="closePwaModal()" aria-label="Yopish">&times;</button>
+    </div>
+    <div class="pwa-modal-body">
+      <p class="pwa-modal-lead">To‘rtko‘ldonmaxsuloti tizimiga tezkor va qulay kirish uchun uni telefoningiz bosh ekraniga qo‘shing:</p>
+      
+      <div class="pwa-step">
+        <div class="pwa-step-num">1</div>
+        <div class="pwa-step-desc">
+          Pastki yoki yuqori panelda <strong>«Ulashish» (Share)</strong> <i data-lucide="share" style="width:17px;height:17px;vertical-align:middle;color:#0284c7;"></i> tugmasini bosing
+        </div>
+      </div>
+      
+      <div class="pwa-step">
+        <div class="pwa-step-num">2</div>
+        <div class="pwa-step-desc">
+          Menyudan <strong>«Ekraningizga qo‘shish» (На экран «Домой» / Add to Home Screen)</strong> <i data-lucide="plus-square" style="width:17px;height:17px;vertical-align:middle;color:#059669;"></i> ni tanlang
+        </div>
+      </div>
+
+      <div class="pwa-step">
+        <div class="pwa-step-num">3</div>
+        <div class="pwa-step-desc">
+          Yuqori o‘ng burchakdagi <strong>«Qo‘shish» (Add)</strong> tugmasini bosing
+        </div>
+      </div>
+    </div>
+    <div class="pwa-modal-footer">
+      <button type="button" class="btn-pwa-ack" onclick="closePwaModal()">Tushunarli</button>
+    </div>
+  </div>
+</div>
+
 <script>
 document.getElementById('top-date').textContent = new Date().toLocaleDateString('{{ ui_date_locale }}', {year: 'numeric', month: 'long', day: 'numeric'});
 
@@ -183,13 +223,24 @@ function toggleMenu(force) {
     }
 }
 
+// Check standalone mode (already installed app)
+function isStandaloneMode() {
+    return window.matchMedia('(display-mode: standalone)').matches || 
+           window.navigator.standalone === true;
+}
+
+if (isStandaloneMode()) {
+    const btn = document.getElementById('pwa-install-btn');
+    if (btn) btn.style.display = 'none';
+}
+
 // PWA installation handling
 let deferredPrompt = null;
 window.addEventListener('beforeinstallprompt', (e) => {
     e.preventDefault();
     deferredPrompt = e;
     const btn = document.getElementById('pwa-install-btn');
-    if (btn) btn.style.display = 'inline-flex';
+    if (btn && !isStandaloneMode()) btn.style.display = 'inline-flex';
 });
 
 function triggerPwaInstall() {
@@ -202,12 +253,30 @@ function triggerPwaInstall() {
             }
             deferredPrompt = null;
         });
+    } else {
+        showPwaModal();
     }
+}
+
+function showPwaModal() {
+    const modal = document.getElementById('pwa-modal');
+    if (modal) {
+        modal.classList.add('open');
+        if (window.lucide && typeof lucide.createIcons === 'function') {
+            lucide.createIcons();
+        }
+    }
+}
+
+function closePwaModal() {
+    const modal = document.getElementById('pwa-modal');
+    if (modal) modal.classList.remove('open');
 }
 
 window.addEventListener('appinstalled', () => {
     const btn = document.getElementById('pwa-install-btn');
     if (btn) btn.style.display = 'none';
+    closePwaModal();
 });
 
 if ('serviceWorker' in navigator && window.isSecureContext) {
