@@ -1734,3 +1734,317 @@ select:focus {
         z-index: 31;
     }
 }
+
+
+/* ========================================================
+   2026 LUCIDE ICONS & FULL RESPONSIVE SUITE (PHONE/TABLET/DESKTOP)
+   ======================================================== */
+
+.lucide {
+    width: 18px;
+    height: 18px;
+    stroke-width: 2.2;
+    vertical-align: -3px;
+    display: inline-block;
+    flex-shrink: 0;
+}
+
+.side-nav a {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.side-nav a .lucide {
+    width: 20px;
+    height: 20px;
+    stroke-width: 2;
+    margin-right: 4px;
+    color: #a7f3d0;
+}
+
+.side-brand .brand-icon .lucide {
+    width: 28px;
+    height: 28px;
+    color: #d5aa48;
+}
+
+.topbar-brand {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-weight: 700;
+}
+
+.topbar-brand .lucide {
+    width: 20px;
+    height: 20px;
+    color: #047857;
+}
+
+.topbar-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.pwa-install-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    background: #ecfdf5;
+    border: 1px solid #a7f3d0;
+    color: #065f46;
+    border-radius: 20px;
+    padding: 6px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.pwa-install-btn:hover {
+    background: #d1fae5;
+    border-color: #6ee7b7;
+}
+
+.user-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #f1f5f9;
+    padding: 4px 10px;
+    border-radius: 20px;
+    border: 1px solid #e2e8f0;
+}
+
+.user-role-badge {
+    background: #e2e8f0;
+    color: #475569;
+    padding: 2px 7px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.6);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 998;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
+body.menu-open .sidebar-backdrop {
+    display: block;
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.sidebar-close {
+    display: none;
+    position: absolute;
+    top: 16px;
+    right: 14px;
+    background: rgba(255, 255, 255, 0.12);
+    border: 0;
+    color: #fff;
+    border-radius: 8px;
+    width: 34px;
+    height: 34px;
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
+body.menu-open .sidebar .sidebar-close {
+    display: inline-flex;
+}
+
+/* Mobile Bottom Navigation Bar */
+.mobile-bottom-bar {
+    display: none;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 60px;
+    background: #ffffff;
+    border-top: 1px solid var(--line);
+    box-shadow: 0 -2px 14px rgba(15, 23, 42, 0.08);
+    z-index: 100;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    justify-content: space-around;
+    align-items: center;
+}
+
+.mobile-bottom-bar a,
+.mobile-bottom-bar button {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #64748b;
+    text-decoration: none;
+    font-size: 10px;
+    font-weight: 600;
+    background: none;
+    border: 0;
+    padding: 6px 0;
+    height: 100%;
+    gap: 3px;
+    cursor: pointer;
+}
+
+.mobile-bottom-bar a.active,
+.mobile-bottom-bar a:hover,
+.mobile-bottom-bar button:hover {
+    color: #047857;
+}
+
+.mobile-bottom-bar .lucide {
+    width: 20px;
+    height: 20px;
+}
+
+/* TABLET STYLES (769px - 1024px) */
+@media (min-width: 769px) and (max-width: 1024px) {
+    .app-shell {
+        margin-left: 230px;
+    }
+    .sidebar {
+        width: 230px;
+    }
+    .cards.overview {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    }
+    .dashboard-grid {
+        grid-template-columns: 1fr !important;
+    }
+    .mobile-bottom-bar {
+        display: none !important;
+    }
+}
+
+/* MOBILE STYLES (< 768px) */
+@media (max-width: 768px) {
+    .app-shell {
+        margin-left: 0 !important;
+        padding-bottom: 74px;
+    }
+    .sidebar {
+        position: fixed;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 280px;
+        max-width: 85vw;
+        transform: translateX(-100%);
+        transition: transform 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+        z-index: 999;
+        box-shadow: 4px 0 24px rgba(0,0,0,0.3);
+    }
+    body.menu-open .sidebar {
+        transform: translateX(0);
+    }
+    .menu-toggle {
+        display: inline-flex !important;
+        align-items: center;
+        justify-content: center;
+        width: 38px;
+        height: 38px;
+        min-width: 38px;
+        border-radius: 8px;
+        background: var(--green);
+        color: #fff;
+        border: 0;
+        cursor: pointer;
+    }
+    .topbar {
+        padding: 10px 14px;
+        gap: 8px;
+    }
+    .top-date {
+        display: none !important;
+    }
+    .cards.overview,
+    .cards {
+        grid-template-columns: 1fr !important;
+        gap: 10px;
+    }
+    .dashboard-grid,
+    .columns {
+        grid-template-columns: 1fr !important;
+        gap: 12px;
+    }
+    .form-grid {
+        grid-template-columns: 1fr !important;
+        gap: 12px;
+    }
+    .form-grid label,
+    .auth label {
+        font-size: 14px;
+    }
+    input, select, textarea {
+        font-size: 16px !important;
+        min-height: 44px;
+        padding: 10px 12px;
+        border-radius: 8px;
+    }
+    button, .quick a {
+        min-height: 44px;
+        padding: 10px 16px;
+        font-size: 14px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+    }
+    .panel {
+        padding: 14px;
+        border-radius: 12px;
+        margin-bottom: 14px;
+    }
+    .table-scroll,
+    .table-wrap,
+    .panel {
+        -webkit-overflow-scrolling: touch;
+        overflow-x: auto;
+    }
+    table {
+        min-width: 500px;
+    }
+    th, td {
+        padding: 8px 10px;
+        font-size: 12px;
+    }
+    .user-chip {
+        font-size: 11px;
+        padding: 3px 8px;
+    }
+    .user-role-badge {
+        display: none;
+    }
+    .mobile-bottom-bar {
+        display: flex;
+    }
+}
+
+@media (max-width: 480px) {
+    .pwa-btn-label {
+        display: none;
+    }
+    .pwa-install-btn {
+        padding: 6px 8px;
+    }
+    .topbar-brand span {
+        font-size: 12px;
+    }
+}
