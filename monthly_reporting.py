@@ -115,6 +115,8 @@ def build_monthly_report(
         con, 'opening_debts', 'date', start, end, parse_date, warnings)
     receipt_rows = _period_rows(
         con, 'worker_receipts', 'date', start, end, parse_date, warnings)
+    opening_receipt_rows = _period_rows(
+        con, 'opening_debt_receipts', 'date', start, end, parse_date, warnings)
     legacy_payment_rows = _period_rows(
         con, 'payments', 'date', start, end, parse_date, warnings)
     expense_rows = _period_rows(
@@ -381,6 +383,31 @@ def build_monthly_report(
             'sale_id': row['sale_id'],
             'channel': row.get('payment_method') or 'Noma’lum',
             'note': '',
+        })
+
+    for row in opening_receipt_rows:
+        amount = _money(row.get('amount'))
+        receipt_total += amount
+        debt = con.execute('SELECT customer,customer_phone FROM opening_debts WHERE id=?',
+                           (row['opening_debt_id'],)).fetchone()
+        if debt is None:
+            _warn(warnings, 'opening_receipt_without_debt',
+                  'Eski qarz to‘lovining manba qarzi topilmadi.', receipt_id=row['id'])
+            continue
+        key = customer_key(debt['customer'],debt['customer_phone'])
+        activity = customer_activity.setdefault(key,{
+            'new_debt': ZERO, 'opening_debt_added': ZERO, 'debt_payments': ZERO})
+        activity['debt_payments'] += amount
+        receipt_detail.append({
+            'date': format_date(row['_day']),
+            'type': 'Eski qarz bo‘yicha to‘lov',
+            'customer': debt['customer'],
+            'phone': debt['customer_phone'],
+            'amount': amount,
+            'recipient': 'Buxgalter' if row['received_by']=='accountant' else 'Xodim',
+            'sale_id': '',
+            'channel': row['payment_method'],
+            'note': row.get('note') or 'Eski qarz #'+str(row['opening_debt_id']),
         })
 
     legacy_receipt_total = sum(

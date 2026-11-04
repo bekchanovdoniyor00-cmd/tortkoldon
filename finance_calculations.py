@@ -130,6 +130,15 @@ Cancelled-sale money is retained as an exception, never silently refunded.
 
     sales = {r['id']: dict(r) for r in con.execute('SELECT * FROM sales')}
     opening_rows = [dict(r) for r in con.execute('SELECT * FROM opening_debts ORDER BY id')]
+    # Backward compatible with older read-only snapshots and isolated tests where
+    # the additive opening-receipt table has not yet been created. Production
+    # migrations must still be run explicitly before accepting new payments.
+    has_opening_receipts = con.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='opening_debt_receipts'"
+    ).fetchone() is not None
+    opening_receipts = ([dict(r) for r in con.execute(
+        'SELECT * FROM opening_debt_receipts ORDER BY id')]
+        if has_opening_receipts else [])
     receipts = [dict(r) for r in con.execute('SELECT * FROM worker_receipts ORDER BY id')]
     accountant_rows = [dict(r) for r in con.execute('SELECT * FROM accountant_worker_receipts')]
     legacy_rows = [dict(r) for r in con.execute('SELECT * FROM payments ORDER BY id')]
@@ -150,6 +159,8 @@ Cancelled-sale money is retained as an exception, never silently refunded.
         row['due_date'] = normalize_date(
             row['due_date'], f"opening_debts[{row['id']}].due_date"
         )
+    for row in opening_receipts:
+        row['date'] = normalize_date(row['date'], f"opening_debt_receipts[{row['id']}].date")
     for row in receipts:
         row['date'] = normalize_date(row['date'], f"worker_receipts[{row['id']}].date")
     for row in accountant_rows:
@@ -188,6 +199,19 @@ Cancelled-sale money is retained as an exception, never silently refunded.
         if row['sale_id'] not in sales or row['sale_id'] in cancelled:
             warnings.append({'code': 'receipt_without_active_sale', 'receipt_id': row['id'], 'amount': amount})
         receipt_rows.append(dict(row, amount=amount, recipient='accountant' if direct is not None else 'worker'))
+    opening_paid = {}
+    for row in opening_receipts:
+        amount = money(row['amount'])
+        received_linked += amount
+        if row['received_by']=='accountant':
+            received_accountant += amount
+        elif row['received_by']=='worker':
+            received_worker += amount
+        else:
+            warnings.append({'code':'opening_receipt_invalid_recipient','receipt_id':row['id']})
+        opening_paid[row['opening_debt_id']] = opening_paid.get(row['opening_debt_id'],zero)+amount
+        receipt_rows.append(dict(row, kind='opening', sale_id=None,
+                                 opening_debt_id=row['opening_debt_id'], recipient=row['received_by']))
     receipt_ids = {r['id'] for r in receipts}
     for rid in accountant.keys() - receipt_ids:
         warnings.append({'code': 'accountant_receipt_without_source', 'receipt_id': rid})
@@ -244,9 +268,16 @@ Cancelled-sale money is retained as an exception, never silently refunded.
         key, customer_id = canonical_identity(row['customer'], row['customer_phone'])
         g = group(key, customer_id)
         g['opening_debt'] += amount
+        paid = opening_paid.get(row['id'],zero)
+        g['linked_paid'] += paid
+        if paid > amount:
+            warnings.append({'code':'opening_debt_overpaid','opening_debt_id':row['id'],'amount':paid-amount})
+            g['linked_excess'] += paid-amount
         g['obligations'].append({'kind': 'opening', 'id': row['id'], 'date': row['date'],
+            'user_id': row.get('worker_id'),
             'due_date': row['due_date'], 'amount': amount, 'initial_paid': zero,
-            'linked_paid': zero, 'legacy_applied': zero, 'balance': amount})
+            'linked_paid': paid, 'legacy_applied': zero,
+            'balance': max(zero,amount-paid)})
 
     legacy_by_name = {}
     unallocated = []

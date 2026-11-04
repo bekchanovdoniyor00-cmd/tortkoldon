@@ -21,8 +21,8 @@
 {% for r in group.sales %}{% set c = r.calculation %}<tr data-sale-id="{{ r.id }}"><td>{{ r.date|business_date }}</td><td>{{ r.product }}</td><td>{{ r.customer_phone }}</td><td>{{ amount(c.amount) }}</td><td>{{ amount(c.initial_paid) }}</td><td>{{ amount(c.linked_paid) }}</td><td>{{ amount(c.legacy_applied) }}</td><td>{{ amount(c.initial_paid + c.linked_paid + c.legacy_applied) }}</td><td class="sale-balance">{{ amount(c.balance) }}</td><td>{% if r.invoice_id %}<a href="{{ url_for('invoice_print',invoice_id=r.invoice_id) }}">№{{ r.invoice_number }}</a>{% endif %}</td></tr>{% else %}<tr><td colspan="10">Faol sotuv yo‘q.</td></tr>{% endfor %}
 </tbody></table>
 <h3>Eski qarz majburiyatlari</h3>
-<table><thead><tr><th>Sana</th><th>Joriy telefon</th><th>Eski qarz summasi</th><th>Taqsimlangan eski to‘lov</th><th>Qoldiq</th><th>Muddat</th></tr></thead><tbody>
-{% for r in group.opening %}{% set c = r.calculation %}<tr data-opening-id="{{ r.id }}"><td>{{ r.date|business_date }}</td><td>{{ r.customer_phone }}</td><td>{{ amount(c.amount) }}</td><td>{{ amount(c.legacy_applied) }}</td><td class="opening-balance">{{ amount(c.balance) }}</td><td>{{ r.due_date|business_date }}</td></tr>{% else %}<tr><td colspan="6">Eski qarz yo‘q.</td></tr>{% endfor %}
+<table><thead><tr><th>Sana</th><th>Joriy telefon</th><th>Eski qarz summasi</th><th>To‘langan (aniq)</th><th>Eski FIFO to‘lovi</th><th>Qoldiq</th><th>Muddat</th></tr></thead><tbody>
+{% for r in group.opening %}{% set c = r.calculation %}<tr data-opening-id="{{ r.id }}"><td>{{ r.date|business_date }}</td><td>{{ r.customer_phone }}</td><td>{{ amount(c.amount) }}</td><td>{{ amount(c.linked_paid) }}</td><td>{{ amount(c.legacy_applied) }}</td><td class="opening-balance">{{ amount(c.balance) }}</td><td>{{ r.due_date|business_date }}</td></tr>{% else %}<tr><td colspan="7">Eski qarz yo‘q.</td></tr>{% endfor %}
 </tbody></table>
 <h3>To‘lovlar tarixi</h3><p>Har bir to‘lov bir marta ko‘rsatiladi. Buxgalter qaydi keyingi to‘lovning qabul qiluvchisini bildiradi, qo‘shimcha tushum emas.</p>{{ history_table(group.history) }}
 </section>

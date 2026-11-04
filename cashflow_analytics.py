@@ -248,6 +248,24 @@ def calculate_cashflow_analytics(con, start_date=None, end_date=None):
                      receipt_id=row['id'])
             if holder_role in accounts:
                 accounts[holder_role]['debt_receipts'] += amount
+    if _columns(con,'opening_debt_receipts'):
+        for row in con.execute('''SELECT r.*,d.customer FROM opening_debt_receipts r
+                JOIN opening_debts d ON d.id=r.opening_debt_id ORDER BY r.id'''):
+            amount = _amount(row['amount'])
+            worker = users.get(row['worker_id'],{})
+            receiver = users.get(row['receiver_id'],{})
+            holder_role = 'buxgalter' if row['received_by']=='accountant' else receiver.get('role')
+            day = event_day(row['date'],'opening_debt_receipts',row['id'])
+            new_event(day,'Eski qarz to‘lovi',amount,'opening_debt_receipts',row['id'],
+                f"Eski qarz #{row['opening_debt_id']}",worker.get('role'),
+                worker.get('username'),amount,holder_role,row['payment_method'],
+                counterparty=row['customer'],
+                details='Eski qarz to‘lovi, sotuv emas; pul faqat qabul qiluvchi kassasida.')
+            if holder_role in accounts:
+                accounts[holder_role]['debt_receipts'] += amount
+            else:
+                warn('opening_receipt_owner_unknown',
+                     'Eski qarz to‘lovi kassaga biriktirilmadi.',receipt_id=row['id'])
     if accountant_receipt_columns:
         receipt_ids = {row['id'] for row in con.execute('SELECT id FROM worker_receipts')}
         for receipt_id in direct_receipts.keys() - receipt_ids:
@@ -353,6 +371,19 @@ def calculate_cashflow_analytics(con, start_date=None, end_date=None):
                  batch_id=batch_id, batch_paid=str(expected), channel_payments=str(recorded))
 
     snapshot = calculate_financial_snapshot(con)
+    for group in snapshot['customers'].values():
+        for obligation in group['obligations']:
+            if obligation['kind']!='opening':
+                continue
+            wid = obligation.get('user_id')
+            role = users.get(wid,{}).get('role')
+            balance = _amount(obligation['balance'])
+            if role in accounts:
+                accounts[role]['debt'] += balance
+                accounts[role]['debt_before_legacy_estimate'] += (balance+_amount(obligation['legacy_applied']))
+            elif balance:
+                warn('opening_debt_owner_unknown',
+                     'Mas’uli belgilanmagan eski qarz.',opening_debt_id=obligation['id'])
     obligations_by_sale = {}
     for group in snapshot['customers'].values():
         for obligation in group['obligations']:
@@ -692,14 +723,14 @@ def calculate_cashflow_analytics(con, start_date=None, end_date=None):
         'linked_receipts': sum((account['sales_later_linked'] for account in accounts.values()), ZERO),
         'legacy_fifo_estimated': sum(
             (account['legacy_fifo_estimated'] for account in accounts.values()), ZERO),
-        'remaining_debt': assigned_debt,
+        'remaining_debt': debt_totals,
         'unassigned_debt': unassigned_debt,
     }
     sales_reconciliation['difference'] = (
         sales_total - sales_reconciliation['initial_paid']
         - sales_reconciliation['linked_receipts']
         - sales_reconciliation['legacy_fifo_estimated']
-        - assigned_debt
+        - debt_totals
     )
     account_sum_matches_company = suspense_balance == ZERO
     if not account_sum_matches_company:

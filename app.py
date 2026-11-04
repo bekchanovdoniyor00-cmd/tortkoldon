@@ -72,6 +72,7 @@ def _monthly_historical_snapshot(con, cutoff, warnings):
         dated_tables = {
             'sales': 'date',
             'opening_debts': 'date',
+            'opening_debt_receipts': 'date',
             'worker_receipts': 'date',
             'accountant_worker_receipts': 'payment_date',
             'payments': 'date',
@@ -367,8 +368,38 @@ def backup_before_internal_cash_transfer_migration():
         raise RuntimeError('Yangi kassa, ombor yoki bug‘doy xaridi jadvalidan oldin DB zaxirasi yaratilmadi.')
 
 
+def backup_before_opening_debt_assignment_migration():
+    """Additive migratsiyadan avval mavjud DB'ning nuqtaviy nusxasi."""
+    if not os.path.isfile(DB_PATH):
+        return
+    with db() as con:
+        exists = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='opening_debts'").fetchone()
+        if not exists:
+            return
+        cols = {row['name'] for row in con.execute('PRAGMA table_info(opening_debts)')}
+        if 'worker_id' in cols:
+            return
+    backup_path = make_backup()
+    if not backup_path.is_file() or backup_path.stat().st_size == 0:
+        raise RuntimeError('Eski qarz migratsiyasi oldidan bazaning zaxirasi olinmadi.')
+
+
+def backup_before_opening_receipts_migration():
+    if not os.path.isfile(DB_PATH):
+        return
+    with db() as con:
+        old = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='opening_debts'").fetchone()
+        new = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='opening_debt_receipts'").fetchone()
+    if old and not new:
+        path = make_backup()
+        if not path.is_file() or path.stat().st_size == 0:
+            raise RuntimeError('Eski qarz to‘lovlari migratsiyasi oldidan zaxira yaratilmadi.')
+
+
 def init_db():
     backup_before_internal_cash_transfer_migration()
+    backup_before_opening_debt_assignment_migration()
+    backup_before_opening_receipts_migration()
     with db() as con:
         con.executescript('''
         CREATE TABLE IF NOT EXISTS users(id INTEGER PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL, role TEXT NOT NULL);
@@ -395,6 +426,30 @@ def init_db():
             amount REAL NOT NULL CHECK(amount > 0), date TEXT NOT NULL,
             due_date TEXT NOT NULL, note TEXT, user_id INTEGER,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP)''')
+        debt_cols = {r['name'] for r in con.execute('PRAGMA table_info(opening_debts)')}
+        if 'worker_id' not in debt_cols:
+            con.execute('ALTER TABLE opening_debts ADD COLUMN worker_id INTEGER REFERENCES users(id)')
+        con.execute("""CREATE TABLE IF NOT EXISTS opening_debt_assignment_audit (
+            id INTEGER PRIMARY KEY,
+            opening_debt_id INTEGER NOT NULL REFERENCES opening_debts(id),
+            old_worker_id INTEGER REFERENCES users(id),
+            new_worker_id INTEGER NOT NULL REFERENCES users(id),
+            actor_user_id INTEGER NOT NULL REFERENCES users(id),
+            changed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+        con.execute("""CREATE TABLE IF NOT EXISTS opening_debt_receipts (
+            id INTEGER PRIMARY KEY,
+            opening_debt_id INTEGER NOT NULL REFERENCES opening_debts(id),
+            worker_id INTEGER NOT NULL REFERENCES users(id),
+            amount REAL NOT NULL CHECK(amount>0),
+            date TEXT NOT NULL,
+            payment_method TEXT NOT NULL CHECK(payment_method IN ('naqd','plastik','hisob')),
+            received_by TEXT NOT NULL CHECK(received_by IN ('worker','accountant')),
+            receiver_id INTEGER NOT NULL REFERENCES users(id),
+            operation_token TEXT NOT NULL,
+            note TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(operation_token,opening_debt_id))""")
+        con.execute('CREATE INDEX IF NOT EXISTS idx_opening_debt_receipts_debt ON opening_debt_receipts(opening_debt_id)')
         con.execute("""CREATE TABLE IF NOT EXISTS invoices (
             id INTEGER PRIMARY KEY, sale_id INTEGER NOT NULL UNIQUE,
             category TEXT NOT NULL, month_key TEXT NOT NULL,
@@ -1145,6 +1200,8 @@ def worker_channel_balances(con, uid):
         result[r['method']] = result.get(r['method'], 0) + float(r['amount'])
     for r in con.execute('SELECT payment_method method, SUM(amount) amount FROM worker_receipts WHERE worker_id=? AND id NOT IN (SELECT receipt_id FROM accountant_worker_receipts) GROUP BY payment_method', (uid,)):
         result[r['method']] = result.get(r['method'], 0) + float(r['amount'])
+    for r in con.execute("SELECT payment_method method, SUM(amount) amount FROM opening_debt_receipts WHERE received_by='worker' AND receiver_id=? GROUP BY payment_method", (uid,)):
+        result[r['method']] = result.get(r['method'], 0) + float(r['amount'])
     for r in con.execute('SELECT payment_method method, SUM(amount) amount FROM expenses WHERE user_id=? GROUP BY payment_method', (uid,)):
         result[r['method']] = result.get(r['method'], 0) - float(r['amount'])
     for r in con.execute("SELECT payment_method method, SUM(amount) amount FROM worker_transfers WHERE worker_id=? AND status='approved' GROUP BY payment_method", (uid,)):
@@ -1165,10 +1222,11 @@ def worker_snapshot_obligations(financial, worker_id, customer=None, phone=None)
         if phone is not None and group['phone'] != normalized_phone:
             continue
         for item in group['obligations']:
-            if item['kind'] == 'sale' and item['user_id'] == worker_id:
+            if item['kind'] in ('sale','opening') and item.get('user_id') == worker_id:
                 obligations.append(dict(item, customer=group['customer'],
                                         phone=group['phone']))
-    return sorted(obligations, key=lambda item: (item['date'], item['id']))
+    return sorted(obligations, key=lambda item: (item['date'],
+        0 if item['kind']=='opening' else 1, item['id']))
 
 
 def snapshot_has_ambiguous_legacy(financial, customer):
@@ -1228,11 +1286,17 @@ def worker_context():
                         s.customer_phone, s.product
                         FROM worker_receipts r JOIN sales s ON s.id=r.sale_id
                         WHERE r.worker_id=? ORDER BY r.id DESC LIMIT 30""", (user['id'],)).fetchall()
+        opening_recent = con.execute("""SELECT r.date,r.amount,r.payment_method,d.customer,d.customer_phone,
+                'Eski qarz' product FROM opening_debt_receipts r
+                JOIN opening_debts d ON d.id=r.opening_debt_id
+                WHERE r.worker_id=? AND r.received_by='worker' ORDER BY r.id DESC LIMIT 30""", (user['id'],)).fetchall()
         recent_receipts = [
             dict(row, customer=customer_display(
                 customer_context, row['customer'], row['customer_phone'])[0])
-            for row in recent_receipts
+            for row in list(recent_receipts) + list(opening_recent)
         ]
+        recent_receipts.sort(key=lambda row: _business_date(row['date'])[0],reverse=True)
+        recent_receipts = recent_receipts[:30]
         expenses = [expense_display(row) for row in con.execute("""SELECT e.*,
                         entered.username AS entered_by_name, source.role AS source_role
                         FROM expenses e
@@ -1675,21 +1739,28 @@ def worker_group_receipt():
             financial = calculate_financial_snapshot(con)
             if snapshot_has_ambiguous_legacy(financial, customer):
                 raise ValueError('Eski to‘lov xaridorning telefoniga ishonchli bog‘lanmagan. Avval aniqlashtiring.')
-            debts = [(item['id'], balance_cents(item['balance']))
+            debts = [(item['kind'],item['id'], balance_cents(item['balance']))
                      for item in worker_snapshot_obligations(financial, user['id'], customer, phone)
                      if balance_cents(item['balance']) > 0]
-            total_cents = sum(rem for _, rem in debts)
+            total_cents = sum(rem for _, _, rem in debts)
             if total_cents <= 0: raise ValueError('Bu xaridorning qarzi topilmadi.')
             if cents > total_cents: raise ValueError('To‘lov umumiy qarzdan oshmasin.')
             con.execute('INSERT INTO worker_group_receipt_operations(token,worker_id,customer,phone_key,amount_cents,payment_method) VALUES(?,?,?,?,?,?)',
                         (token,user['id'],customer,key,cents,payment_method))
             left = cents
-            for sale_id, rem in debts:
+            for kind, obligation_id, rem in debts:
                 if left <= 0: break
                 take = min(left, rem)
-                receipt = con.execute('INSERT INTO worker_receipts(sale_id,worker_id,amount,date,payment_method) VALUES(?,?,?,?,?)',
-                                      (sale_id,user['id'],take/100,_business_date_storage(date.today().isoformat()),payment_method)).lastrowid
-                con.execute('INSERT INTO worker_group_receipt_operation_items(token,receipt_id) VALUES(?,?)', (token,receipt))
+                receipt_day = _business_date_storage(date.today().isoformat())
+                if kind == 'opening':
+                    con.execute('''INSERT INTO opening_debt_receipts
+                        (opening_debt_id,worker_id,amount,date,payment_method,received_by,receiver_id,operation_token)
+                        VALUES(?,?,?,?,?,'worker',?,?)''',
+                        (obligation_id,user['id'],take/100,receipt_day,payment_method,user['id'],token))
+                else:
+                    receipt = con.execute('INSERT INTO worker_receipts(sale_id,worker_id,amount,date,payment_method) VALUES(?,?,?,?,?)',
+                                          (obligation_id,user['id'],take/100,receipt_day,payment_method)).lastrowid
+                    con.execute('INSERT INTO worker_group_receipt_operation_items(token,receipt_id) VALUES(?,?)', (token,receipt))
                 left -= take
         flash('To‘lov saqlandi. Pul eng eski qarzlardan boshlab taqsimlandi.','success')
     except (ValueError,OverflowError,sqlite3.Error) as exc:
@@ -1979,8 +2050,17 @@ def worker_admin():
         sums=con.execute("""SELECT worker_id,payment_method,COALESCE(SUM(amount),0) amount
                           FROM worker_transfers WHERE status='approved'
                           GROUP BY worker_id,payment_method""").fetchall()
+        # Both invoice debt and opening debt collected directly by accountant.
+        # UNION ALL preserves every receipt; GROUP BY summarizes each worker/channel once.
         direct_rows=con.execute("""SELECT worker_id,payment_method,COALESCE(SUM(amount),0) amount
-                            FROM accountant_worker_receipts GROUP BY worker_id,payment_method""").fetchall()
+                            FROM (
+                                SELECT worker_id,payment_method,amount
+                                FROM accountant_worker_receipts
+                                UNION ALL
+                                SELECT worker_id,payment_method,amount
+                                FROM opening_debt_receipts
+                                WHERE received_by='accountant'
+                            ) GROUP BY worker_id,payment_method""").fetchall()
         direct={(r['worker_id'],r['payment_method']):float(r['amount']) for r in direct_rows}
         collected={(r['worker_id'],r['payment_method']):float(r['amount']) for r in sums}
         received_by_worker=[{'username':w['username'], 'worker_id':w['id'],
@@ -2035,6 +2115,19 @@ def worker_transfers_excel():
         directs = [dict(r) for r in con.execute("""SELECT r.*,a.username accountant
             FROM accountant_worker_receipts r LEFT JOIN users a ON a.id=r.accountant_id
             ORDER BY business_date_key(r.payment_date),r.id""")]
+        # Export opening debt accountant receipts with the same column schema.
+        # Negative in-memory IDs distinguish this source from the sales receipt IDs;
+        # no database ID is changed, and the Excel deduplication remains effective.
+        directs.extend(dict(r) for r in con.execute("""
+            SELECT -r.id AS id, r.worker_id, r.receiver_id AS accountant_id,
+                   d.customer, d.customer_phone, r.payment_method, r.amount,
+                   r.date AS payment_date, r.note, r.created_at,
+                   a.username AS accountant
+            FROM opening_debt_receipts r
+            JOIN opening_debts d ON d.id=r.opening_debt_id
+            LEFT JOIN users a ON a.id=r.receiver_id
+            WHERE r.received_by='accountant'
+            ORDER BY business_date_key(r.date),r.id"""))
     finally:
         con.close()
     today = date.today().isoformat()
@@ -2090,7 +2183,7 @@ def boss_statistics():
                     r = con.execute('SELECT date,product,qty_kg,user_id FROM sales WHERE id=?',(item['id'],)).fetchone()
                     product,qty,seller = r['product'],r['qty_kg'],users.get(r['user_id'],'Belgilanmagan')
                 else:
-                    product,qty,seller = 'Eski qarz',None,'Biriktirilmagan'
+                    product,qty,seller = 'Eski qarz',None,users.get(item.get('user_id'),'Biriktirilmagan')
                 debt_details.append({'customer':customer['customer'],'phone':customer['phone'],
                     'date':item['date'],
                     'product':product,'qty':qty,'seller':seller,'balance':item['balance'],
@@ -2637,10 +2730,14 @@ def customer_debt_details(con, customer):
         _business_date(due)
         if r['balance'] > 0.009:
             obligations.append({'kind':'sale', 'id':r['id'], 'date':r['date'], 'due_date':due, 'balance':float(r['balance'])})
-    for r in con.execute('SELECT id,date,due_date,amount FROM opening_debts WHERE customer=?', (customer,)):
+    for r in con.execute('''SELECT d.id,d.date,d.due_date,d.amount,
+             COALESCE((SELECT SUM(r.amount) FROM opening_debt_receipts r WHERE r.opening_debt_id=d.id),0) paid
+             FROM opening_debts d WHERE d.customer=?''', (customer,)):
         _business_date(r['date'])
         _business_date(r['due_date'])
-        obligations.append({'kind':'opening', 'id':r['id'], 'date':r['date'], 'due_date':r['due_date'], 'balance':float(r['amount'])})
+        remaining = float(r['amount'])-float(r['paid'])
+        if remaining>0.009:
+            obligations.append({'kind':'opening', 'id':r['id'], 'date':r['date'], 'due_date':r['due_date'], 'balance':remaining})
     obligations.sort(key=lambda r: (_business_date(r['date'])[0], 0 if r['kind']=='opening' else 1, r['id']))
     remaining_payments = float(con.execute('SELECT COALESCE(SUM(amount),0) FROM payments WHERE customer=?', (customer,)).fetchone()[0] or 0)
     items = []
@@ -2696,7 +2793,13 @@ def debt_customers(con, financial=None, per_obligation=False):
 @login_required
 def opening_debt_page():
     if request.method=='POST':
+        if current_user()['role'] != 'buxgalter':
+            abort(403)
         try:
+            worker_raw = request.form.get('worker_id', '').strip()
+            if not worker_raw.isdecimal():
+                raise ValueError('Mas’ul xodimni tanlang.')
+            worker_id = int(worker_raw)
             customer=request.form.get('customer','').strip()
             phone=request.form.get('customer_phone','').strip()
             amount=float(request.form.get('amount','0'))
@@ -2716,8 +2819,11 @@ def opening_debt_page():
                 if previous:
                     flash('Eski qarz oldin saqlangan. Takror qarz yaratilmadi.', 'success')
                     return redirect(url_for('debtors_page'))
-                debt_id = con.execute('INSERT INTO opening_debts(customer,customer_phone,amount,date,due_date,note,user_id) VALUES(?,?,?,?,?,?,?)',
-                    (customer,phone,amount,debt_date,due,request.form.get('note','').strip(),session['user_id'])).lastrowid
+                worker = con.execute("SELECT id FROM users WHERE id=? AND role IN ('umid','maxmud') AND active=1", (worker_id,)).fetchone()
+                if worker is None:
+                    raise ValueError('Tanlangan mas’ul xodim mavjud yoki faol emas.')
+                debt_id = con.execute('INSERT INTO opening_debts(customer,customer_phone,amount,date,due_date,note,user_id,worker_id) VALUES(?,?,?,?,?,?,?,?)',
+                    (customer,phone,amount,debt_date,due,request.form.get('note','').strip(),session['user_id'],worker_id)).lastrowid
                 save_remaining_operation(con, 'opening_debt', token, payload, debt_id)
             flash('Eski qarz saqlandi. Ombor va sotuv summasi o‘zgarmadi.','success')
             return redirect(url_for('debtors_page'))
@@ -2725,8 +2831,9 @@ def opening_debt_page():
             flash(str(exc) or 'Ma’lumotlarni tekshiring.','error')
     with db() as con:
         customer_context=customer_identity_context(con)
+        workers = con.execute("SELECT id,username,role FROM users WHERE role IN ('umid','maxmud') AND active=1 ORDER BY id").fetchall()
         history,history_pagination=paginate_rows(con,
-            'SELECT * FROM opening_debts ORDER BY id DESC',
+            '''SELECT d.*,u.username AS worker_name FROM opening_debts d LEFT JOIN users u ON u.id=d.worker_id ORDER BY d.id DESC''',
             'SELECT COUNT(*) FROM opening_debts')
         display_history=[]
         for row in history:
@@ -2734,7 +2841,45 @@ def opening_debt_page():
                 customer_context,row['customer'],row['customer_phone'])
             display_history.append(dict(row,customer=name,customer_phone=phone))
     return render_template('opening_debt.html',rows=display_history,
-        today=date.today().isoformat(),pagination=history_pagination)
+        today=date.today().isoformat(),pagination=history_pagination,workers=workers)
+
+
+@app.route('/eski-qarz/<int:debt_id>/masul', methods=['POST'])
+@login_required
+def assign_opening_debt_worker(debt_id):
+    """Faqat ilgari biriktirilmagan qarzni buxgalter nomiga bog'lash.
+
+    Qarz summasi, ombor, tushum yoki tarixiy to'lovlar qayta yozilmaydi.
+    """
+    if current_user()['role'] != 'buxgalter':
+        abort(403)
+    try:
+        worker_raw = request.form.get('worker_id', '').strip()
+        if not worker_raw.isdecimal():
+            raise ValueError('Mas’ul xodimni tanlang.')
+        worker_id = int(worker_raw)
+        with db() as con:
+            con.execute('BEGIN IMMEDIATE')
+            token, payload, previous, _ = check_remaining_operation(con, 'opening_debt_assign')
+            if previous:
+                flash('Mas’ul xodim ilgari biriktirilgan. Takror o‘zgartirilmadi.', 'success')
+                return redirect(url_for('opening_debt_page'))
+            debt = con.execute('SELECT id,worker_id FROM opening_debts WHERE id=?', (debt_id,)).fetchone()
+            if debt is None:
+                raise ValueError('Eski qarz topilmadi.')
+            if debt['worker_id'] is not None:
+                raise ValueError('Bu qarzga mas’ul xodim allaqachon biriktirilgan; qayta biriktirish alohida audit talab qiladi.')
+            worker = con.execute("SELECT id FROM users WHERE id=? AND role IN ('umid','maxmud') AND active=1", (worker_id,)).fetchone()
+            if worker is None:
+                raise ValueError('Tanlangan mas’ul xodim mavjud yoki faol emas.')
+            con.execute('UPDATE opening_debts SET worker_id=? WHERE id=? AND worker_id IS NULL', (worker_id,debt_id))
+            con.execute("INSERT INTO opening_debt_assignment_audit (opening_debt_id,old_worker_id,new_worker_id,actor_user_id) VALUES(?,NULL,?,?)", (debt_id,worker_id,session['user_id']))
+            save_remaining_operation(con,'opening_debt_assign',token,payload,debt_id)
+        flash('Eski qarz mas’ul xodimga biriktirildi; qarz summasi o‘zgarmadi.','success')
+    except (ValueError,sqlite3.Error) as exc:
+        flash(str(exc) or 'Biriktirishda xato.','error')
+    return redirect(url_for('opening_debt_page'))
+
 
 @app.route('/qarzdorlar')
 @login_required
@@ -2834,25 +2979,31 @@ def payments_page():
                     return redirect(url_for('payments_page',worker_id=wid))
                 if snapshot_has_ambiguous_legacy(financial, customer):
                     raise ValueError('Eski to‘lov xaridorning telefoniga ishonchli bog‘lanmagan. Avval aniqlashtiring.')
-                debts=[(item['id'],balance_cents(item['balance']))
+                debts=[(item['kind'],item['id'],balance_cents(item['balance']))
                        for item in worker_snapshot_obligations(financial,wid,customer,phone)
                        if balance_cents(item['balance'])>0]
                 if not debts: raise ValueError('Ushbu xodimda xaridor qarzi topilmadi.')
-                if cents>sum(r for _,r in debts): raise ValueError('To‘lov qarzdan oshmasligi kerak.')
+                if cents>sum(r for _,_,r in debts): raise ValueError('To‘lov qarzdan oshmasligi kerak.')
                 con.execute('INSERT INTO accountant_payment_operations(token,accountant_id,payload) VALUES(?,?,?)',
                             (token,user['id'],payload))
                 left=cents
                 note=request.form.get('note','').strip()[:300]
-                for sid,rem in debts:
+                for kind,oid,rem in debts:
                     if not left: break
                     part=min(left,rem);left-=part
-                    receipt=con.execute('INSERT INTO worker_receipts(sale_id,worker_id,amount,date,payment_method) VALUES(?,?,?,?,?)',
-                       (sid,wid,part/100,pay_date,method)).lastrowid
-                    accountant_receipt=con.execute("""INSERT INTO accountant_worker_receipts
-                       (receipt_id,worker_id,accountant_id,customer,customer_phone,payment_method,amount,payment_date,note)
-                       VALUES(?,?,?,?,?,?,?,?,?)""",(receipt,wid,user['id'],customer,phone,method,part/100,pay_date,note)).lastrowid
-                    con.execute('INSERT INTO accountant_payment_operation_items(token,receipt_id,accountant_receipt_id) VALUES(?,?,?)',
-                                (token,receipt,accountant_receipt))
+                    if kind == 'opening':
+                        con.execute('''INSERT INTO opening_debt_receipts
+                            (opening_debt_id,worker_id,amount,date,payment_method,received_by,receiver_id,operation_token,note)
+                            VALUES(?,?,?,?,?,'accountant',?,?,?)''',
+                            (oid,wid,part/100,pay_date,method,user['id'],token,note))
+                    else:
+                        receipt=con.execute('INSERT INTO worker_receipts(sale_id,worker_id,amount,date,payment_method) VALUES(?,?,?,?,?)',
+                           (oid,wid,part/100,pay_date,method)).lastrowid
+                        accountant_receipt=con.execute("""INSERT INTO accountant_worker_receipts
+                           (receipt_id,worker_id,accountant_id,customer,customer_phone,payment_method,amount,payment_date,note)
+                           VALUES(?,?,?,?,?,?,?,?,?)""",(receipt,wid,user['id'],customer,phone,method,part/100,pay_date,note)).lastrowid
+                        con.execute('INSERT INTO accountant_payment_operation_items(token,receipt_id,accountant_receipt_id) VALUES(?,?,?)',
+                                    (token,receipt,accountant_receipt))
                 flash('To‘lov saqlandi. Qarz kamaydi, pul faqat buxgalter kassasiga yozildi.','success')
                 return redirect(url_for('payments_page',worker_id=wid))
             groups={}
@@ -2869,12 +3020,22 @@ def payments_page():
                 'payment_blocked':snapshot_has_ambiguous_legacy(financial,k[0]),
             } for k,v in sorted(groups.items())]
             history,history_pagination=paginate_rows(con,
-                """SELECT a.*,u.username worker_name,au.username accountant_name
-                   FROM accountant_worker_receipts a JOIN users u ON u.id=a.worker_id
-                   JOIN users au ON au.id=a.accountant_id ORDER BY a.id DESC""",
-                """SELECT COUNT(*) FROM accountant_worker_receipts a
-                   JOIN users u ON u.id=a.worker_id
-                   JOIN users au ON au.id=a.accountant_id""",
+                """SELECT * FROM (
+                    SELECT a.payment_date,a.customer,a.customer_phone,a.payment_method,
+                           a.amount,a.note,u.username worker_name,au.username accountant_name,
+                           'sotuv' AS source_type,a.id AS source_id
+                    FROM accountant_worker_receipts a
+                    JOIN users u ON u.id=a.worker_id
+                    JOIN users au ON au.id=a.accountant_id
+                    UNION ALL
+                    SELECT r.date,d.customer,d.customer_phone,r.payment_method,r.amount,r.note,
+                           u.username,au.username,'eski_qarz',r.id
+                    FROM opening_debt_receipts r JOIN opening_debts d ON d.id=r.opening_debt_id
+                    JOIN users u ON u.id=r.worker_id JOIN users au ON au.id=r.receiver_id
+                    WHERE r.received_by='accountant'
+                ) ORDER BY business_date_key(payment_date) DESC,source_id DESC""",
+                """SELECT (SELECT COUNT(*) FROM accountant_worker_receipts)
+                           +(SELECT COUNT(*) FROM opening_debt_receipts WHERE received_by='accountant')""",
                 page_param='history_page',per_page_param='history_per_page')
             legacy,legacy_pagination=paginate_rows(con,
                 'SELECT * FROM payments ORDER BY id DESC',
@@ -3322,6 +3483,7 @@ def unified_excel_report():
                     as_of_tables = (
                         ('sales', 'date'),
                         ('opening_debts', 'date'),
+                        ('opening_debt_receipts', 'date'),
                         ('worker_receipts', 'date'),
                         ('accountant_worker_receipts', 'payment_date'),
                         ('payments', 'date'),
@@ -4654,6 +4816,17 @@ def excel_report():
                 customer,phone=customer_display(
                     customer_context,sale.get('customer',''),sale.get('customer_phone',''))
                 events.append([r['date'],customer,phone,Decimal(str(r['amount'])),note,'Buxgalter olgan qarz to‘lovi' if accountant else 'Xodim olgan qarz to‘lovi','worker_receipts',r['id'],users.get(recipient,''),users.get(r['worker_id'],''),r['payment_method']])
+            for r in query(con,'SELECT * FROM opening_debt_receipts ORDER BY date,id',
+                           table='opening_debt_receipts'):
+                debt=con.execute('SELECT customer,customer_phone FROM opening_debts WHERE id=?',
+                                 (r['opening_debt_id'],)).fetchone()
+                if debt is None:
+                    continue
+                customer,phone=customer_display(customer_context,debt['customer'],debt['customer_phone'])
+                events.append([r['date'],customer,phone,Decimal(str(r['amount'])),
+                    (r['note'] or '')+' | Eski qarz #'+str(r['opening_debt_id']),
+                    'Eski qarz to‘lovi','opening_debt_receipts',r['id'],
+                    users.get(r['receiver_id'],''),users.get(r['worker_id'],''),r['payment_method']])
             for row in sorted(events,key=lambda r:(mixed_date_to_iso(r[0]),r[6],r[7])): ws.append(row)
             notes = wb.create_sheet('Izoh va ogohlantirishlar')
             notes.append(['Mavzu','Qiymat yoki tushuntirish'])
@@ -4947,6 +5120,9 @@ def customer_statement(customer):
         matching_sale_ids = {
             sid for sid,row in sales.items() if belongs_to_statement(row)
         }
+        opening_receipts = [dict(r) for r in con.execute(
+            'SELECT o.*,d.customer,d.customer_phone FROM opening_debt_receipts o '
+            'JOIN opening_debts d ON d.id=o.opening_debt_id')]
         receipts = [r for r in financial['receipts'] if r['sale_id'] in matching_sale_ids]
         receipt_ids = {r['id'] for r in receipts}
         if matching_sale_ids:
@@ -4981,6 +5157,16 @@ def customer_statement(customer):
                             'recipient':'sale','note':'Sotuvdagi boshlang‘ich to‘lov'})
                 else:
                     group_opening.append(row)
+            group_opening_ids = {r['id'] for r in group_opening}
+            for receipt in opening_receipts:
+                if receipt['opening_debt_id'] in group_opening_ids:
+                    _,current_phone = customer_display(
+                        customer_context,receipt['customer'],receipt['customer_phone'])
+                    history.append({'kind':'receipt','id':receipt['id'],
+                        'sale_id':None,'date':receipt['date'],
+                        'amount':Decimal(str(receipt['amount'])),
+                        'phone':current_phone,'recipient':receipt['received_by'],
+                        'note':'Eski qarz bo‘yicha to‘lov #'+str(receipt['opening_debt_id'])})
             ids = {r['id'] for r in group_sales}
             for receipt in receipts:
                 if receipt['sale_id'] in ids:
@@ -5247,6 +5433,9 @@ def cash_receipt_totals(con, day, custodian='all'):
         UNION ALL SELECT date,amount,'legacy','','0','buxgalter' FROM payments
         UNION ALL SELECT r.date,r.amount,'linked',r.payment_method,
             EXISTS(SELECT 1 FROM accountant_worker_receipts a WHERE a.receipt_id=r.id),'' FROM worker_receipts r
+        UNION ALL SELECT r.date,r.amount,'linked',r.payment_method,
+            CASE WHEN r.received_by='accountant' THEN 1 ELSE 0 END,
+            (SELECT role FROM users WHERE id=r.receiver_id) FROM opening_debt_receipts r
         UNION ALL SELECT date,amount,'expenses','',0,(SELECT role FROM users WHERE id=expenses.user_id) FROM expenses
         UNION ALL SELECT payment_date,amount,'expenses',payment_method,0,'buxgalter'
             FROM wheat_purchase_payments
@@ -5382,6 +5571,8 @@ def finance_page():
         accountant_cash={m:0 for m in PAYMENT_METHODS}
         for r in con.execute('SELECT payment_method,SUM(amount) amount FROM accountant_worker_receipts GROUP BY payment_method'):
             accountant_cash[r['payment_method']]=float(r['amount'])
+        for r in con.execute("SELECT payment_method,SUM(amount) amount FROM opening_debt_receipts WHERE received_by='accountant' GROUP BY payment_method"):
+            accountant_cash[r['payment_method']]=accountant_cash.get(r['payment_method'],0)+float(r['amount'])
     # Debt collections are cash receipts on sales recognized earlier, NOT additional revenue.
     return render_template('finance.html',sales=sales,wheat=wheat,expense=expense,
        estimate=sales-wheat-expense,accountant_cash=accountant_cash,
