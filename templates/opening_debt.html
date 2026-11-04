@@ -2,9 +2,14 @@
 <section class="panel"><form method="post" class="form-grid"><input type="hidden" name="operation_token" value="{{ write_operation_token('opening_debt') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Xaridor nomi *<input name="customer" required maxlength="200"></label>
 <label>Telefon raqami *<input name="customer_phone" type="tel" required maxlength="40"></label>
+<label>Mas’ul xodim *<select name="worker_id" required><option value="">Tanlang</option>{% for w in workers %}<option value="{{ w.id }}">{{ w.username }}</option>{% endfor %}</select></label>
 <label>Eski qarz summasi (so‘m) *<input name="amount" type="number" min="0.01" step="0.01" required></label>
 <label>Qarz olingan sana *<input name="date" type="date" value="{{ today }}" required></label>
 <label>To‘lov muddati *<input name="due_date" type="date" required></label>
 <label>Izoh<input name="note"></label>
 <button type="submit">Eski qarzni saqlash</button></form></section>
-<section class="panel"><h2>Kiritilgan eski qarzlar</h2><table><tr><th>Xaridor</th><th>Telefon</th><th>Qarz</th><th>Sana</th><th>Muddat</th></tr>{% for r in rows %}<tr><td>{{ r.customer }}</td><td>{{ r.customer_phone }}</td><td>{{ '%.0f'|format(r.amount) }} so‘m</td><td>{{ r.date|business_date }}</td><td>{{ r.due_date|business_date }}</td></tr>{% else %}<tr><td colspan="5">Eski qarz yozuvlari yo‘q.</td></tr>{% endfor %}</table>{{ render_pagination(pagination) }}</section>{% endblock %}
+<section class="panel"><h2>Kiritilgan eski qarzlar</h2><table><tr><th>Xaridor</th><th>Telefon</th><th>Qarz</th><th>Mas’ul xodim</th><th>Sana</th><th>Muddat</th><th>Biriktirish</th></tr>{% for r in rows %}<tr><td>{{ r.customer }}</td><td>{{ r.customer_phone }}</td><td>{{ '%.0f'|format(r.amount) }} so‘m</td><td>{{ r.worker_name or 'Biriktirilmagan' }}</td><td>{{ r.date|business_date }}</td><td>{{ r.due_date|business_date }}</td><td>{% if not r.worker_id %}
+<form method="post" action="{{ url_for('assign_opening_debt_worker',debt_id=r.id) }}" style="display:flex;gap:6px;flex-wrap:wrap">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="operation_token" value="{{ write_operation_token('opening_debt_assign') }}">
+<select name="worker_id" required><option value="">Tanlang</option>{% for w in workers %}<option value="{{ w.id }}">{{ w.username }}</option>{% endfor %}</select><button type="submit">Biriktirish</button></form>
+{% else %}Biriktirilgan{% endif %}</td></tr>{% else %}<tr><td colspan="7">Eski qarz yozuvlari yo‘q.</td></tr>{% endfor %}</table>{{ render_pagination(pagination) }}</section>{% endblock %}
