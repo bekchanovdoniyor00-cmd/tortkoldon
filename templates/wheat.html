@@ -62,7 +62,7 @@ wheatOpeningToggle.addEventListener('click',()=>{const open=wheatOpeningForm.sty
 <section class="panel">
   <h2>Xaridlar tarixi</h2>
   <table>
-    <tr><th>Sana</th><th>Xarid turi</th><th>Yetkazuvchi</th><th>Brutto (t)</th><th>Tara (t)</th><th>Sof (t)</th><th>Narx (so‘m/kg)</th><th>Izoh</th></tr>
+    <tr><th>Sana</th><th>Xarid turi</th><th>Yetkazuvchi</th><th>Brutto (t)</th><th>Tara (t)</th><th>Sof (t)</th><th>Narx (so‘m/kg)</th><th>Izoh</th>{% if current_user.role == 'buxgalter' %}<th>Amal</th>{% endif %}</tr>
     {% for r in rows %}
     <tr>
       <td>{{ r.date|business_date }}</td>
@@ -73,6 +73,7 @@ wheatOpeningToggle.addEventListener('click',()=>{const open=wheatOpeningForm.sty
       <td>{{ '%.3f'|format(r.net/1000) }}</td>
       <td>{{ '%.2f'|format(r.price_per_kg) }}</td>
       <td>{{ r.note or '—' }}</td>
+      {% if current_user.role == 'buxgalter' %}<td>{% if r.purchase_method != 'Boshlang‘ich zaxira' %}<a href="{{ url_for('edit_wheat_purchase_metadata', receipt_id=r.id) }}">Tavsifni tahrirlash</a>{% else %}—{% endif %}</td>{% endif %}
     </tr>
     {% endfor %}
   </table>

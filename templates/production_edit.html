@@ -1,0 +1,58 @@
+{% extends 'base.html' %}
+{% block content %}
+{% set fields = [('wheat_kg', 'cleaned_wheat', 'Tozalangan bug‘doy'),
+                 ('bulk_kg', 'bulk_kg', 'Bunker uni'),
+                 ('black_kg', 'black_kg', 'Qora un'),
+                 ('bran_kg', 'bran_kg', 'Kepak'),
+                 ('muchka_kg', 'muchka_kg', 'Muchka'),
+                 ('telashka_kg', 'telashka_kg', 'Telashka atxod')] %}
+<h1>Ishlab chiqarish yozuvi №{{ row.id }}</h1>
+<p><a href="{{ url_for('production_page') }}">Ishlab chiqarish tarixiga qaytish</a></p>
+<section class="panel">
+  <p>Sana · {{ row.date|business_date }}</p>
+  {% if row.stop_day %}<p>Zachiska tasdiqlangan · {{ row.stop_day|business_date }}</p>{% endif %}
+  {% if can_edit %}
+  <form method="post" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="operation_token" value="{{ write_operation_token('rop_production_edit', production_id=row.id, revision=row.revision) }}">
+    {% for key, name, label in fields %}
+    <label>{{ label }} (kg)
+      <input type="number" name="{{ name }}" value="{{ row[key] }}" min="{{ '0.001' if key == 'wheat_kg' else '0' }}" step="0.001" required>
+    </label>
+    {% endfor %}
+    <label class="wide">Izoh <textarea name="note" maxlength="500">{{ row.note or '' }}</textarea></label>
+    <label class="wide">Tahrirlash sababi <textarea name="reason" maxlength="500" required></textarea></label>
+    <button type="submit">Tahrirni saqlash</button>
+  </form>
+  {% else %}
+  <dl>
+    {% for key, name, label in fields %}<dt>{{ label }}</dt><dd>{{ row[key] }} kg</dd>{% endfor %}
+    <dt>Izoh</dt><dd>{{ row.note or '—' }}</dd>
+  </dl>
+  {% endif %}
+</section>
+<section class="panel">
+  <h2>Tahrir tarixi</h2>
+  {% for entry, previous, new in changes %}
+  <details>
+    <summary>{{ entry.created_at }} UTC · {{ entry.username }}</summary>
+    <p>Sabab · {{ entry.reason }}</p>
+    <table>
+      <thead><tr><th>Maydon</th><th>Avval</th><th>Keyin</th></tr></thead>
+      <tbody>
+        {% for key, name, label in fields %}
+        {% if previous[key] != new[key] %}
+        <tr><td>{{ label }} (kg)</td><td>{{ previous[key] }}</td><td>{{ new[key] }}</td></tr>
+        {% endif %}
+        {% endfor %}
+        {% if previous.note != new.note %}
+        <tr><td>Izoh</td><td>{{ previous.note or '—' }}</td><td>{{ new.note or '—' }}</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </details>
+  {% else %}
+  <p>Tahrirlar hali yo‘q.</p>
+  {% endfor %}
+</section>
+{% endblock %}

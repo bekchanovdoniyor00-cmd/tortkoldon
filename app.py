@@ -5,6 +5,7 @@ from functools import wraps
 import math
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from datetime import datetime, date, timedelta
+from contextlib import closing
 from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import URLSafeSerializer, BadSignature
 from finance_calculations import (
@@ -12,8 +13,55 @@ from finance_calculations import (
     resolve_customer_identity, resolve_customer_name,
 )
 from date_conversions import dmy_to_date, iso_to_date
+from business_dates import (
+    _business_date,
+    _business_date_after,
+    _business_date_key,
+    _business_date_storage,
+    _html_date_storage,
+    _business_date_input,
+    _business_date_display,
+    _monthly_parse_date,
+)
 from ui_translations import DEFAULT_LANGUAGE, LANGUAGES, get_language, translate
 from monthly_reporting import build_monthly_report, build_monthly_workbook
+from unified_excel_export import export_unified_excel_report
+from legacy_excel_export import export_legacy_excel_report
+from accountant_worker_excel_export import export_accountant_worker_payments_excel
+from report_snapshot_helpers import _monthly_historical_snapshot
+from debt_report_helpers import customer_debt_details, debt_customers
+from cash_report_helpers import sale_payment_allocations, cash_receipt_totals
+from worker_finance_helpers import (
+    worker_channel_balances, worker_balance, worker_snapshot_obligations,
+    snapshot_has_ambiguous_legacy, balance_cents, payment_amount_cents,
+)
+from inventory_sales_helpers import (
+    product_stocks, bagged_product_stocks, validate_bagged_sale,
+    record_bagged_sale, product_stock_activity_exists, sale_values,
+)
+from worker_read_services import (
+    build_worker_context, load_worker_stock_status, search_worker_customers,
+)
+from static_routes import (
+    serve_service_worker, serve_robots_txt, serve_sitemap_xml,
+)
+from bulk_flour_service import (amount, ensure_schema as ensure_bulk_schema, bunker_balance, save_opening, save_production, save_packaging)
+import rop_service as rop
+import production_edit
+from zachiska_print import build_zachiska_draft
+import rop_forms
+import rop_form_exports
+from product_catalog import (
+    FLOUR_TYPES, BAGGED_FLOUR_PRODUCTS, PRODUCTS, BAG_OPTIONS,
+    LOOSE_PRODUCTS, INVOICE_GROUPS, WORKER_PRODUCTS,
+)
+from customer_helpers import phone_key, customer_display
+from invoices_page_service import render_invoices_page
+from customer_statement_service import build_customer_statement
+from daily_finished_stock import record_daily_receipt
+from warehouse_stock_corrections import (
+    record_adjustment, edit_daily_receipt, receipt_fingerprint,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = (
@@ -24,267 +72,31 @@ DB_PATH = (
 )
 OPENING_WHEAT_METHOD = 'Boshlang‘ich zaxira'
 
-def _business_date(value):
-    if isinstance(value, str) and re.fullmatch(r'\d{4}-\d{2}-\d{2}', value):
-        return iso_to_date(value), 'iso'
-    if isinstance(value, str) and re.fullmatch(r'\d{2}-\d{2}-\d{4}', value):
-        return dmy_to_date(value), 'dmy'
-    raise ValueError('Sana YYYY-MM-DD yoki DD-MM-YYYY formatida bo‘lishi kerak.')
-
-def _business_date_after(value, days):
-    parsed, date_format = _business_date(value)
-    result = parsed + timedelta(days=days)
-    if date_format == 'iso':
-        return result.isoformat()
-    return f'{result.day:02d}-{result.month:02d}-{result.year:04d}'
-
-def _business_date_key(value):
-    return _business_date(value)[0].isoformat()
-
-def _business_date_storage(value):
-    parsed, _ = _business_date(value)
-    return f'{parsed.day:02d}-{parsed.month:02d}-{parsed.year:04d}'
-
-def _html_date_storage(value):
-    parsed = iso_to_date(value)
-    return f'{parsed.day:02d}-{parsed.month:02d}-{parsed.year:04d}'
-
-def _business_date_input(value):
-    return _business_date(value)[0].isoformat()
-
-def _business_date_display(value):
-    parsed, _ = _business_date(value)
-    return parsed.strftime('%d.%m.%Y')
-
-def _monthly_parse_date(value):
-    if isinstance(value, str) and len(value) > 10:
-        value = value[:10]
-    return _business_date(value)
-
-def _monthly_historical_snapshot(con, cutoff, warnings):
-    snapshot = sqlite3.connect(':memory:')
-    snapshot.row_factory = sqlite3.Row
-    try:
-        con.backup(snapshot)
-        snapshot.create_function(
-            'business_date_key', 1, _business_date_key, deterministic=True)
-        cutoff_text = cutoff.isoformat()
-        dated_tables = {
-            'sales': 'date',
-            'opening_debts': 'date',
-            'opening_debt_receipts': 'date',
-            'worker_receipts': 'date',
-            'accountant_worker_receipts': 'payment_date',
-            'payments': 'date',
-            'sale_cancellations': 'cancelled_at',
-            'production': 'date',
-            'wheat_receipts': 'date',
-            'opening_product_stocks': 'stock_date',
-            'opening_bagged_product_stocks': 'stock_date',
-            'expenses': 'date',
-            'accountant_cash_additions': 'date',
-            'wheat_purchase_payments': 'payment_date',
-            'account_cash_transfers': 'date',
-            'worker_sale_batch_payments': 'created_at',
-            'worker_sale_batches': 'created_at',
-        }
-        for table, date_column in dated_tables.items():
-            exists = snapshot.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                (table,)).fetchone()
-            if not exists:
-                continue
-            columns = {
-                row['name'] for row in
-                snapshot.execute(f'PRAGMA table_info("{table}")')
-            }
-            if date_column not in columns:
-                continue
-            for row in snapshot.execute(
-                    f'SELECT rowid AS _rowid, "{date_column}" AS _date '
-                    f'FROM "{table}"').fetchall():
-                try:
-                    row_day = _monthly_parse_date(row['_date'])[0]
-                except (TypeError, ValueError):
-                    if table == 'worker_transfers':
-                        continue
-                    if table == 'sale_cancellations':
-                        snapshot.execute(
-                            'DELETE FROM sale_cancellations WHERE rowid=?',
-                            (row['_rowid'],))
-                    else:
-                        snapshot.execute(
-                            f'DELETE FROM "{table}" WHERE rowid=?',
-                            (row['_rowid'],))
-                    warnings.append({
-                        'key': 'historical_snapshot_undated',
-                        'message': (
-                            'Sana aniqlanmagan tarixiy yozuv cutoff hisobiga '
-                            'kiritilmadi.'),
-                        'table': table,
-                        'record_id': row['_rowid'],
-                        'date': row['_date'],
-                    })
-                    continue
-                if row_day > cutoff:
-                    snapshot.execute(
-                        f'DELETE FROM "{table}" WHERE rowid=?',
-                        (row['_rowid'],))
-        for table, parent_table, parent_id, child_id in (
-                ('production_flour_types', 'production', 'id', 'production_id'),
-                ('bagged_production_lines', 'production', 'id', 'production_id'),
-                ('bagged_sale_deductions', 'sales', 'id', 'sale_id'),
-                ('worker_sale_batch_items', 'sales', 'id', 'sale_id')):
-            child_exists = snapshot.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                (table,)).fetchone()
-            parent_exists = snapshot.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-                (parent_table,)).fetchone()
-            if child_exists and parent_exists:
-                snapshot.execute(
-                    f'DELETE FROM "{table}" WHERE "{child_id}" NOT IN '
-                    f'(SELECT "{parent_id}" FROM "{parent_table}")')
-        if snapshot.execute(
-                "SELECT 1 FROM sqlite_master WHERE type='table' "
-                "AND name='worker_transfers'").fetchone():
-            for row in snapshot.execute(
-                        "SELECT rowid AS _rowid,id,decided_at FROM worker_transfers "
-                    "WHERE status='approved'").fetchall():
-                try:
-                    transfer_day = _monthly_parse_date(row['decided_at'])[0]
-                except (TypeError, ValueError):
-                    snapshot.execute(
-                        'DELETE FROM worker_transfers WHERE rowid=?',
-                        (row['_rowid'],))
-                    warnings.append({
-                        'key': 'historical_snapshot_undated_transfer',
-                        'message': 'Tasdiqlangan transfer sanasi noaniq; '
-                                   'tarixiy kassa snapshotiga kiritilmadi.',
-                        'record_id': row['id'],
-                    })
-                    continue
-                if transfer_day > cutoff:
-                    snapshot.execute(
-                        'DELETE FROM worker_transfers WHERE rowid=?',
-                        (row['_rowid'],))
-
-        stocks = product_stocks(snapshot)
-        bags = bagged_product_stocks(snapshot)
-        wheat_in = snapshot.execute(
-            'SELECT COALESCE(SUM(net),0) FROM wheat_receipts').fetchone()[0]
-        wheat_used = snapshot.execute(
-            'SELECT COALESCE(SUM(COALESCE(raw_wheat_kg,wheat_kg)),0) '
-            'FROM production').fetchone()[0]
-        try:
-            financial = calculate_financial_snapshot(snapshot)
-        except ValueError as exc:
-            financial = None
-            warnings.append({
-                'key': 'historical_debt_snapshot_error',
-                'message': 'Tarixiy qarz snapshotini hisoblab bo‘lmadi: '
-                           f'{exc}',
-                'cutoff': cutoff_text,
-            })
-        return {
-            'stocks': stocks,
-            'bags': bags,
-            'wheat_stock': Decimal(str(wheat_in or 0)) - Decimal(str(wheat_used or 0)),
-            'financial': financial,
-        }
-    finally:
-        snapshot.close()
 
 app = Flask(__name__)
 
-PAGINATION_SIZES = (20, 50, 100)
-
-
-def _pagination_state(total, page_param='page', per_page_param='per_page'):
-    try:
-        per_page = int(request.args.get(per_page_param, '20'))
-    except (TypeError, ValueError):
-        per_page = 20
-    if per_page not in PAGINATION_SIZES:
-        per_page = 20
-    try:
-        requested_page = int(request.args.get(page_param, '1'))
-    except (TypeError, ValueError):
-        requested_page = 1
-    total = max(0, int(total))
-    pages = max(1, (total + per_page - 1) // per_page)
-    page = min(max(1, requested_page), pages)
-    if pages <= 7:
-        page_window = list(range(1, pages + 1))
-    else:
-        page_window = [1]
-        if page > 4:
-            page_window.append(None)
-        page_window.extend(range(max(2, page - 1), min(pages, page + 1) + 1))
-        if page < pages - 3:
-            page_window.append(None)
-        page_window.append(pages)
-    return {
-        'total': total,
-        'per_page': per_page,
-        'page': page,
-        'pages': pages,
-        'offset': (page - 1) * per_page,
-        'start': (page - 1) * per_page + 1 if total else 0,
-        'end': min(page * per_page, total),
-        'window': page_window,
-        'page_param': page_param,
-        'per_page_param': per_page_param,
-    }
-
-
-def paginate_rows(con, select_sql, count_sql, params=(),
-                  page_param='page', per_page_param='per_page'):
-    total = con.execute(count_sql, params).fetchone()[0]
-    pagination = _pagination_state(total, page_param, per_page_param)
-    rows = con.execute(
-        f'{select_sql} LIMIT ? OFFSET ?',
-        (*params, pagination['per_page'], pagination['offset']),
-    ).fetchall()
-    return rows, pagination
-
-
-def paginate_items(items, page_param='page', per_page_param='per_page'):
-    pagination = _pagination_state(len(items), page_param, per_page_param)
-    start = pagination['offset']
-    return items[start:start + pagination['per_page']], pagination
+from pagination_utils import PAGINATION_SIZES, _pagination_state, paginate_rows, paginate_items
+from pagination_context_helpers import build_pagination_context
 
 
 @app.context_processor
 def pagination_context():
-    def pagination_url(page, pagination):
-        values = request.args.to_dict(flat=False)
-        values[pagination['page_param']] = str(page)
-        values[pagination['per_page_param']] = str(pagination['per_page'])
-        route_values = dict(request.view_args or {})
-        route_values.update(values)
-        return url_for(request.endpoint, **route_values)
-    return {'pagination_url': pagination_url}
+    return build_pagination_context(request, url_for)
 
 
 @app.route('/service-worker.js')
 def service_worker():
-    response = send_from_directory(
-        app.static_folder, 'service-worker.js', mimetype='application/javascript'
-    )
-    response.headers['Service-Worker-Allowed'] = '/'
-    response.headers['Cache-Control'] = 'no-cache'
-    return response
+    return serve_service_worker()
 
 
 @app.route('/robots.txt')
 def robots_txt():
-    return send_from_directory(app.static_folder, 'robots.txt', mimetype='text/plain')
+    return serve_robots_txt()
 
 
 @app.route('/sitemap.xml')
 def sitemap_xml():
-    return send_from_directory(app.static_folder, 'sitemap.xml', mimetype='application/xml')
+    return serve_sitemap_xml()
 
 
 # A separate persistent session secret for the isolated test installation.
@@ -325,18 +137,6 @@ def business_date_filter(value):
 @app.template_filter('business_date_input')
 def business_date_input_filter(value):
     return _business_date_input(value) if value else ''
-
-def phone_key(raw):
-    digits=re.sub(r'\D','',raw or '')
-    if len(digits)==9: digits='998'+digits
-    return digits if len(digits)==12 and digits.startswith('998') else ''
-
-def customer_display(context, name, phone=None):
-    card = (resolve_customer_identity(context, name, phone)
-            if phone is not None else resolve_customer_name(context, name))
-    if card is None:
-        return name, phone
-    return card['name'], card['phone'] if phone is not None else None
 
 def backup_before_internal_cash_transfer_migration():
     if not os.path.isfile(DB_PATH):
@@ -397,6 +197,13 @@ def backup_before_opening_receipts_migration():
 
 
 def init_db():
+    if os.path.isfile(DB_PATH):
+        with closing(db()) as con:
+            tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+        if not set(rop.ROP_TABLES) <= tables:
+            backup_path = make_backup()
+            if not backup_path.is_file():
+                raise RuntimeError('ROP migratsiyasi oldidan zaxira yaratilmadi.')
     backup_before_internal_cash_transfer_migration()
     backup_before_opening_debt_assignment_migration()
     backup_before_opening_receipts_migration()
@@ -496,6 +303,10 @@ def init_db():
             bag_count INTEGER NOT NULL CHECK(typeof(bag_count)='integer' AND bag_count>0),
             PRIMARY KEY(production_id,product,bag_kg),
             FOREIGN KEY(production_id) REFERENCES production(id))""")
+        ensure_bulk_schema(con)
+        if not con.in_transaction:
+            con.execute('BEGIN IMMEDIATE')
+        rop.ensure_schema(con)
         con.execute("""CREATE TABLE IF NOT EXISTS bagged_sale_deductions (
             sale_id INTEGER PRIMARY KEY,
             product TEXT NOT NULL,
@@ -688,8 +499,8 @@ def init_db():
 
 # Role checks must be enforced on the server, not only in HTML navigation.
 BOSS_READ_ENDPOINTS = {
-    'dashboard', 'boss_statistics', 'wheat', 'production_page', 'sales_page', 'invoices_page',
-    'invoice_saved', 'invoice_print', 'debtors_page', 'payments_page', 'unified_excel_report',
+    'dashboard', 'boss_statistics', 'wheat', 'production_page', 'zachiska_print', 'edit_rop_production', 'packaging_page', 'sales_page', 'worker_customer_search', 'invoices_page',
+    'invoice_saved', 'invoice_print', 'debtors_page', 'payments_page', 'unified_excel_report', 'rop_form_document',
     'expenses_page', 'reports', 'warehouses', 'excel_report', 'customer_statement',
     'cash_page', 'control_page', 'daily_page', 'finance_page', 'worker_admin', 'combined_finance_page', 'monthly_finance_excel', 'cashflow_test_page', 'worker_batch_invoice', 'worker_transfers_excel', 'worker_sale_result'
 }
@@ -713,18 +524,18 @@ def login_required(fn):
         role, endpoint = user['role'], request.endpoint
         if role in ('umid', 'maxmud', 'ishchi'):
             # Until financial ownership is migrated, never expose global records.
-            if endpoint not in ('dashboard', 'change_password', 'worker_sales', 'worker_new_sale', 'worker_receipt', 'worker_expense', 'worker_transfer', 'worker_customer_search', 'worker_customer_edit', 'worker_sale_form', 'worker_debts', 'worker_archive', 'worker_customers_page', 'worker_cash_page', 'worker_group_receipt', 'worker_stock_status', 'worker_multi_sale', 'worker_batch_invoice', 'worker_sale_result') and not (role == 'umid' and endpoint == 'production_page'):
+            if endpoint not in ('dashboard', 'change_password', 'worker_sales', 'worker_new_sale', 'worker_receipt', 'worker_expense', 'worker_transfer', 'worker_customer_search', 'worker_customer_edit', 'worker_sale_form', 'worker_debts', 'worker_archive', 'worker_customers_page', 'worker_cash_page', 'worker_group_receipt', 'worker_stock_status', 'worker_multi_sale', 'worker_batch_invoice', 'worker_sale_result') :
                 abort(403, description='Xodimning shaxsiy hisobi keyingi bosqichda ishga tushadi.')
         elif role == 'rahbar':
-            if endpoint == 'change_password':
+            if endpoint in ('change_password', 'debtor_legacy_edit', 'debtor_card_edit'):
                 pass
             elif request.method != 'GET' or endpoint not in BOSS_READ_ENDPOINTS:
                 abort(403, description='Boshliq faqat ma’lumotlarni ko‘ra oladi.')
         elif role != 'buxgalter':
             abort(403)
-        if endpoint == 'production_page':
-            if role not in ('umid', 'rahbar') or (role == 'rahbar' and request.method != 'GET'):
-                abort(403, description='Ishlab chiqarish faqat Umidga biriktirilgan.')
+        if endpoint in ('production_page', 'edit_rop_production', 'packaging_page'):
+            if role not in ('buxgalter', 'rahbar') or (role == 'rahbar' and request.method != 'GET'):
+                abort(403, description='Ishlab chiqarish va qoplash faqat buxgalterga biriktirilgan.')
         return fn(*args, **kwargs)
     return wrapped
 
@@ -740,7 +551,7 @@ def csrf_context():
 def check_csrf():
     if (session.get('role') == 'rahbar'
             and request.method not in ('GET', 'HEAD', 'OPTIONS')
-            and request.endpoint not in ('set_language', 'logout')):
+            and request.endpoint not in ('set_language', 'logout', 'debtor_legacy_edit', 'debtor_card_edit')):
         abort(403, description='Boshliq hech qanday o‘zgartirish amalini bajara olmaydi.')
     if request.method == 'POST':
         expected = session.get('csrf_token', '')
@@ -785,25 +596,6 @@ def set_language():
         target = '/'
     return redirect(target)
 
-FLOUR_TYPES = ('Sara', 'Yevro', 'Zar Bug‘doy', 'Robiya', 'Qora un')
-BAGGED_FLOUR_PRODUCTS = ('Sara', 'Yevro', 'Zar Bug‘doy', 'Robiya')
-PRODUCTS = FLOUR_TYPES + ('Kepak', 'Muchka', 'Telashka atxod')
-BAG_OPTIONS = {'Sara': (25, 50), 'Yevro': (25, 50), 'Zar Bug‘doy': (25, 50),
-               'Robiya': (25, 50), 'Qora un': (30,), 'Kepak': (23,),
-               'Muchka': (50,), 'Telashka atxod': ()}
-LOOSE_PRODUCTS = ('Kepak', 'Muchka', 'Telashka atxod')
-
-INVOICE_GROUPS = {
-    'Robiya': ('oliy', 'Oliy nav un'),
-    'Sara': ('birinchi', '1-nav un'),
-    'Yevro': ('birinchi', '1-nav un'),
-    'Zar Bug‘doy': ('birinchi', '1-nav un'),
-    'Qora un': ('qora', 'Qora un'),
-    'Kepak': ('kepak', 'Kepak'),
-    'Muchka': ('muchka', 'Muchka'),
-    'Telashka atxod': ('telashka', 'Teleshka atxod'),
-}
-
 def ensure_invoice(con, sale_id, product, sale_date):
     sale_day, _ = _business_date(sale_date)
     existing = con.execute('SELECT id FROM invoices WHERE sale_id=?', (sale_id,)).fetchone()
@@ -817,210 +609,15 @@ def ensure_invoice(con, sale_id, product, sale_date):
     return con.execute('INSERT INTO invoices(sale_id,category,month_key,number,issued_date) VALUES(?,?,?,?,?)',
                        (sale_id,category,month_key,next_num,sale_date)).lastrowid
 
-def product_stocks(con):
-    made = {p: 0.0 for p in PRODUCTS}
-    for r in con.execute('SELECT product, SUM(qty_kg) AS qty FROM production_flour_types GROUP BY product'):
-        if r['product'] in made: made[r['product']] += r['qty'] or 0
-    for col, product in [('bran_kg','Kepak'), ('muchka_kg','Muchka'), ('telashka_kg','Telashka atxod')]:
-        made[product] += con.execute(f'SELECT COALESCE(SUM({col}),0) FROM production').fetchone()[0]
-    # Eski sinov ma'lumotlari yo'qolmasligi uchun eski "Un" alohida qoladi.
-    made['Un (eski yozuv)'] = con.execute('SELECT COALESCE(SUM(flour_kg),0) FROM production').fetchone()[0] - sum(made[p] for p in FLOUR_TYPES)
-    for r in con.execute('SELECT product, SUM(qty_kg) AS qty FROM sales WHERE id NOT IN (SELECT sale_id FROM sale_cancellations) GROUP BY product'):
-        key = 'Un (eski yozuv)' if r['product'] == 'Un' else r['product']
-        made[key] = made.get(key, 0) - (r['qty'] or 0)
-    if con.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='opening_product_stocks'"
-    ).fetchone():
-        production_columns = {
-            'Kepak': 'bran_kg',
-            'Muchka': 'muchka_kg',
-            'Telashka atxod': 'telashka_kg',
-        }
-        for opening in con.execute('SELECT product,stock_date,qty_kg FROM opening_product_stocks'):
-            product = opening['product']
-            opening_day = _business_date_key(opening['stock_date'])
-            if product in FLOUR_TYPES:
-                production_after_opening = con.execute("""
-                    SELECT COALESCE(SUM(pt.qty_kg),0)
-                    FROM production_flour_types pt
-                    JOIN production p ON p.id=pt.production_id
-                    WHERE pt.product=? AND business_date_key(p.date)>=?
-                """, (product, opening_day)).fetchone()[0]
-            else:
-                column = production_columns.get(product)
-                if column is None:
-                    continue
-                production_after_opening = con.execute(
-                    f'SELECT COALESCE(SUM({column}),0) FROM production '
-                    'WHERE business_date_key(date)>=?', (opening_day,)
-                ).fetchone()[0]
-            sold_after_opening = con.execute("""
-                SELECT COALESCE(SUM(qty_kg),0) FROM sales
-                WHERE product=? AND business_date_key(date)>=?
-                AND id NOT IN (SELECT sale_id FROM sale_cancellations)
-            """, (product, opening_day)).fetchone()[0]
-            made[product] = opening['qty_kg'] + production_after_opening - sold_after_opening
-    for opening in con.execute("""
-            SELECT product,stock_date,bag_25_count,bag_50_count
-            FROM opening_bagged_product_stocks"""):
-        product = opening['product']
-        opening_day = _business_date_key(opening['stock_date'])
-        opening_kg = opening['bag_25_count'] * 25 + opening['bag_50_count'] * 50
-        existing_opening = con.execute(
-            'SELECT 1 FROM opening_product_stocks WHERE product=?',
-            (product,)).fetchone()
-        if existing_opening:
-            made[product] += opening_kg
-        else:
-            production_after_opening = con.execute("""
-                SELECT COALESCE(SUM(pt.qty_kg),0)
-                FROM production_flour_types pt
-                JOIN production p ON p.id=pt.production_id
-                WHERE pt.product=? AND business_date_key(p.date)>=?
-            """, (product, opening_day)).fetchone()[0]
-            sold_after_opening = con.execute("""
-                SELECT COALESCE(SUM(qty_kg),0) FROM sales
-                WHERE product=? AND business_date_key(date)>=?
-                AND id NOT IN (SELECT sale_id FROM sale_cancellations)
-            """, (product, opening_day)).fetchone()[0]
-            made[product] = opening_kg + production_after_opening - sold_after_opening
-    return made
 
 
-def bagged_product_stocks(con):
-    """Return bag counts from explicit production, sale, and opening ledgers."""
-    stocks = {product: {25: 0, 50: 0} for product in BAGGED_FLOUR_PRODUCTS}
-    opening_dates = {}
-    for row in con.execute("""
-            SELECT product,stock_date,bag_25_count,bag_50_count
-            FROM opening_bagged_product_stocks"""):
-        if row['product'] not in stocks:
-            continue
-        opening_dates[row['product']] = _business_date_key(row['stock_date'])
-        stocks[row['product']][25] += row['bag_25_count']
-        stocks[row['product']][50] += row['bag_50_count']
-    for row in con.execute("""
-            SELECT b.product,b.bag_kg,b.bag_count,p.date
-            FROM bagged_production_lines b
-            JOIN production p ON p.id=b.production_id"""):
-        if (row['product'] in stocks and row['bag_kg'] in stocks[row['product']]
-                and (row['product'] not in opening_dates
-                     or _business_date_key(row['date']) >= opening_dates[row['product']])):
-            stocks[row['product']][row['bag_kg']] += row['bag_count']
-    for row in con.execute("""
-            SELECT d.product,d.bag_kg,d.bag_count,s.date
-            FROM bagged_sale_deductions d
-            JOIN sales s ON s.id=d.sale_id
-            LEFT JOIN sale_cancellations c ON c.sale_id=s.id
-            WHERE c.sale_id IS NULL"""):
-        if (row['product'] in stocks and row['bag_kg'] in stocks[row['product']]
-                and (row['product'] not in opening_dates
-                     or _business_date_key(row['date']) >= opening_dates[row['product']])):
-            stocks[row['product']][row['bag_kg']] -= row['bag_count']
-    for row in con.execute("""
-            SELECT s.product,s.bag_kg,s.bag_count,s.qty_kg,s.date
-            FROM sales s
-            LEFT JOIN bagged_sale_deductions d ON d.sale_id=s.id
-            LEFT JOIN sale_cancellations c ON c.sale_id=s.id
-            WHERE s.sale_mode='qop' AND d.sale_id IS NULL
-              AND c.sale_id IS NULL"""):
-        product = row['product']
-        if product not in stocks:
-            continue
-        try:
-            size = int(row['bag_kg'])
-            count = int(row['bag_count'])
-            quantity = float(row['qty_kg'])
-        except (TypeError, ValueError, OverflowError):
-            continue
-        if (size not in stocks[product] or count <= 0
-                or float(row['bag_kg']) != size
-                or float(row['bag_count']) != count
-                or quantity != size * count):
-            continue
-        if (product in opening_dates
-                and _business_date_key(row['date']) < opening_dates[product]):
-            continue
-        stocks[product][size] -= count
-    return stocks
 
 
-def validate_bagged_sale(con, product, mode, bag_kg, bag_count,
-                         exclude_sale_id=None):
-    if product not in BAGGED_FLOUR_PRODUCTS or mode != 'qop':
-        return
-    try:
-        size = int(bag_kg)
-        count = int(bag_count)
-    except (TypeError, ValueError, OverflowError) as exc:
-        raise ValueError('Qop o‘lchami va sonini tekshiring.') from exc
-    if size not in (25, 50) or float(bag_kg) != size:
-        raise ValueError('Ushbu mahsulot uchun faqat 25 kg yoki 50 kg qop mavjud.')
-    if count <= 0 or float(bag_count) != count:
-        raise ValueError('Qop soni musbat butun son bo‘lishi kerak.')
-    available = bagged_product_stocks(con)[product][size]
-    if exclude_sale_id is not None:
-        existing = con.execute(
-            'SELECT product,bag_kg,bag_count FROM bagged_sale_deductions WHERE sale_id=?',
-            (exclude_sale_id,)).fetchone()
-        if existing and existing['product'] == product and existing['bag_kg'] == size:
-            available += existing['bag_count']
-    if count > available:
-        raise ValueError(
-            f'{product} uchun {size} kg qop yetarli emas. '
-            'Eski kilogramm qoldiqlari qop o‘lchami bo‘yicha hisoblanmaydi.')
 
 
-def record_bagged_sale(con, sale_id, product, mode, bag_kg, bag_count):
-    con.execute('DELETE FROM bagged_sale_deductions WHERE sale_id=?', (sale_id,))
-    if product in BAGGED_FLOUR_PRODUCTS and mode == 'qop':
-        con.execute("""INSERT INTO bagged_sale_deductions
-            (sale_id,product,bag_kg,bag_count) VALUES(?,?,?,?)""",
-            (sale_id, product, int(bag_kg), int(bag_count)))
 
 
-def product_stock_activity_exists(con, product, from_day):
-    production_columns = {
-        'Kepak': 'bran_kg',
-        'Muchka': 'muchka_kg',
-        'Telashka atxod': 'telashka_kg',
-    }
-    if product in FLOUR_TYPES:
-        production = con.execute("""
-            SELECT 1 FROM production_flour_types pt
-            JOIN production p ON p.id=pt.production_id
-            WHERE pt.product=? AND pt.qty_kg>0 AND business_date_key(p.date)>=?
-            LIMIT 1
-        """, (product, from_day)).fetchone()
-    else:
-        column = production_columns.get(product)
-        production = con.execute(
-            f'SELECT 1 FROM production WHERE COALESCE({column},0)>0 '
-            'AND business_date_key(date)>=? LIMIT 1', (from_day,)
-        ).fetchone() if column else None
-    if production:
-        return True
-    return con.execute("""
-        SELECT 1 FROM sales
-        WHERE product=? AND business_date_key(date)>=?
-        AND id NOT IN (SELECT sale_id FROM sale_cancellations)
-        LIMIT 1
-    """, (product, from_day)).fetchone() is not None
 
-def sale_values(form):
-    product = form['product']
-    if product not in PRODUCTS: raise ValueError('Mahsulot noto‘g‘ri')
-    mode = form.get('sale_mode', 'qop')
-    if mode == 'qop':
-        bag_kg = float(form['bag_kg']); count = float(form['bag_count']); unit_price = float(form['price'])
-        if bag_kg not in BAG_OPTIONS[product] or count <= 0 or count != int(count): raise ValueError('Qop soni yoki hajmi noto‘g‘ri')
-        qty = bag_kg * count; total = count * unit_price
-    elif mode == 'kg' and product in LOOSE_PRODUCTS:
-        bag_kg = None; count = None; qty = float(form['qty_kg']); unit_price = float(form['price']); total = qty * unit_price
-    else: raise ValueError('Sotuv turi noto‘g‘ri')
-    paid = float(form.get('paid') or 0)
-    if not all(math.isfinite(x) for x in (qty,unit_price,total,paid)) or not (qty > 0 and unit_price >= 0 and 0 <= paid <= total): raise ValueError('Miqdor yoki narx noto‘g‘ri')
-    return product, mode, bag_kg, count, unit_price, qty, total, paid
 
 @app.route('/setup', methods=['GET','POST'])
 def setup():
@@ -1096,7 +693,7 @@ def dashboard():
             if len(phones) > 1:
                 financial_warnings.append({'code': 'same_name_multiple_phones', 'customer': name})
         wheat_in = con.execute('SELECT COALESCE(SUM(net),0) FROM wheat_receipts').fetchone()[0]
-        wheat_used = con.execute('SELECT COALESCE(SUM(COALESCE(raw_wheat_kg,wheat_kg)),0) FROM production').fetchone()[0]
+        wheat_used = rop.wheat_warehouse_used(con)
         stocks = product_stocks(con)
         flour_stock = sum(stocks.get(p,0) for p in FLOUR_TYPES) + stocks.get('Un (eski yozuv)',0)
         bran_stock = stocks.get('Kepak',0)
@@ -1107,7 +704,7 @@ def dashboard():
         expense_total = con.execute('SELECT COALESCE(SUM(amount),0) FROM expenses').fetchone()[0]
         # Dashboard chart: group real sales into five mutually exclusive product groups.
         sales_groups = (
-            ('un', 'Un', ('Sara', 'Yevro', 'Zar Bug‘doy', 'Robiya', 'Un')),
+            ('un', 'Un', (*BAGGED_FLOUR_PRODUCTS, 'Un')),
             ('qora-un', 'Qora un', ('Qora un',)),
             ('kepak', 'Kepak', ('Kepak',)),
             ('muchka', 'Muchka', ('Muchka',)),
@@ -1147,193 +744,43 @@ def dashboard():
     return render_template('dashboard.html', wheat_stock=wheat_in-wheat_used, flour_stock=flour_stock, bran_stock=bran_stock, muchka_stock=muchka_stock, telashka_stock=telashka_stock, sales_total=sales_total, paid_total=paid_total, debts=debts, financial_totals=financial['totals'], financial_warnings=financial_warnings, expense_total=expense_total, recent_sales=recent_sales, recent_receipts=recent_receipts, daily_sales=daily_sales, sales_groups=sales_groups, max_daily=max_daily, max_stock=max_stock)
 
 
-WORKER_PRODUCTS = {
-    'umid': ('Sara', 'Yevro', 'Zar Bug‘doy', 'Robiya'),
-    'maxmud': ('Kepak', 'Qora un', 'Muchka', 'Telashka atxod'),
-}
-
-PAYMENT_METHODS = {'naqd': 'Naqd', 'plastik': 'Plastik', 'hisob': 'Hisobdan o‘tkazish'}
-EXPENSE_PAYMENT_METHODS = {'naqd': 'Naqd', 'plastik': 'Plastik', 'hisob': 'Bank'}
-EXPENSE_FUND_SOURCES = {
-    'umid': 'Umid kassasi',
-    'maxmud': 'Maxmud kassasi',
-    'buxgalter': 'Buxgalter kassasi',
-}
+from payment_helpers import (
+    PAYMENT_METHODS, EXPENSE_PAYMENT_METHODS, EXPENSE_FUND_SOURCES,
+    expense_display, payment_method_from_form,
+)
 
 
-def expense_display(row):
-    result = dict(row)
-    result['actual_person_display'] = (result.get('actual_person') or '').strip() or 'Aniqlanmagan'
-    result['entered_by_display'] = result.get('entered_by_name') or 'Aniqlanmagan'
-    result['purpose_display'] = (result.get('purpose') or '').strip() or 'Aniqlanmagan'
-    result['payment_method_display'] = EXPENSE_PAYMENT_METHODS.get(
-        result.get('payment_method'), 'Aniqlanmagan')
-    source = result.get('fund_source')
-    if source not in EXPENSE_FUND_SOURCES:
-        source = result.get('source_role')
-    result['fund_source_display'] = EXPENSE_FUND_SOURCES.get(source, 'Aniqlanmagan')
-    return result
 
 
-def payment_method_from_form(form):
-    method = form.get('payment_method', 'naqd')
-    if method not in PAYMENT_METHODS:
-        raise ValueError('To‘lov turi noto‘g‘ri.')
-    return method
 
 
-def worker_channel_balances(con, uid):
-    result = {method: 0.0 for method in PAYMENT_METHODS}
-    # Legacy rows without an explicit recipient remain assigned to the seller.
-    for r in con.execute("""SELECT s.payment_method method, COALESCE(SUM(s.paid),0) amount
-          FROM sales s LEFT JOIN sale_cancellations c ON c.sale_id=s.id
-          WHERE COALESCE(s.initial_payment_recipient_id,s.user_id)=? AND c.sale_id IS NULL
-          AND NOT EXISTS (SELECT 1 FROM worker_sale_batch_items bi WHERE bi.sale_id=s.id)
-          GROUP BY s.payment_method""", (uid,)):
-        result[r['method']] = result.get(r['method'], 0) + float(r['amount'])
-    for r in con.execute("""SELECT bp.payment_method method, SUM(bp.amount) amount
-          FROM worker_sale_batch_payments bp JOIN worker_sale_batches b ON b.id=bp.batch_id
-          WHERE b.worker_id=? AND NOT EXISTS (
-              SELECT 1 FROM worker_sale_batch_items bi JOIN sale_cancellations c ON c.sale_id=bi.sale_id
-              WHERE bi.batch_id=b.id)
-          GROUP BY bp.payment_method""", (uid,)):
-        result[r['method']] = result.get(r['method'], 0) + float(r['amount'])
-    for r in con.execute('SELECT payment_method method, SUM(amount) amount FROM worker_receipts WHERE worker_id=? AND id NOT IN (SELECT receipt_id FROM accountant_worker_receipts) GROUP BY payment_method', (uid,)):
-        result[r['method']] = result.get(r['method'], 0) + float(r['amount'])
-    for r in con.execute("SELECT payment_method method, SUM(amount) amount FROM opening_debt_receipts WHERE received_by='worker' AND receiver_id=? GROUP BY payment_method", (uid,)):
-        result[r['method']] = result.get(r['method'], 0) + float(r['amount'])
-    for r in con.execute('SELECT payment_method method, SUM(amount) amount FROM expenses WHERE user_id=? GROUP BY payment_method', (uid,)):
-        result[r['method']] = result.get(r['method'], 0) - float(r['amount'])
-    for r in con.execute("SELECT payment_method method, SUM(amount) amount FROM worker_transfers WHERE worker_id=? AND status='approved' GROUP BY payment_method", (uid,)):
-        result[r['method']] = result.get(r['method'], 0) - float(r['amount'])
-    return {method: round(result.get(method, 0.0), 2) for method in PAYMENT_METHODS}
 
 
-def worker_balance(con, uid):
-    return round(sum(worker_channel_balances(con, uid).values()), 2)
 
 
-def worker_snapshot_obligations(financial, worker_id, customer=None, phone=None):
-    normalized_phone = phone_key(phone) or (phone or '')
-    obligations = []
-    for group in financial['customers'].values():
-        if customer is not None and group['customer'] != customer:
-            continue
-        if phone is not None and group['phone'] != normalized_phone:
-            continue
-        for item in group['obligations']:
-            if item['kind'] in ('sale','opening') and item.get('user_id') == worker_id:
-                obligations.append(dict(item, customer=group['customer'],
-                                        phone=group['phone']))
-    return sorted(obligations, key=lambda item: (item['date'],
-        0 if item['kind']=='opening' else 1, item['id']))
 
 
-def snapshot_has_ambiguous_legacy(financial, customer):
-    return any(warning['code'] == 'legacy_identity_ambiguous'
-               and warning.get('customer') == customer
-               for warning in financial['warnings'])
-
-
-def balance_cents(balance):
-    return int((balance * 100).to_integral_value(rounding=ROUND_DOWN))
-
-
-def payment_amount_cents(raw_amount):
-    amount = float(raw_amount)
-    if not math.isfinite(amount) or amount <= 0:
-        raise ValueError('To‘lov summasini tekshiring.')
-    cents = round(amount * 100)
-    if cents <= 0 or abs(amount * 100 - cents) > 0.001:
-        raise ValueError('Summani tiyingacha aniq kiriting.')
-    return cents
 
 
 def worker_context():
     user = current_user()
     if user['role'] not in WORKER_PRODUCTS: abort(403)
-    with db() as con:
-        con.execute('BEGIN')
-        sale_select = """SELECT s.*, CASE WHEN c.sale_id IS NULL THEN 0 ELSE 1 END cancelled,
-            COALESCE((SELECT SUM(r.amount) FROM worker_receipts r WHERE r.sale_id=s.id),0) receipts
-            FROM sales s LEFT JOIN sale_cancellations c ON c.sale_id=s.id
-            WHERE s.user_id=? ORDER BY s.id DESC"""
-        if request.endpoint == 'worker_archive':
-            rows,rows_pagination=paginate_rows(con,sale_select,
-                'SELECT COUNT(*) FROM sales WHERE user_id=?',(user['id'],))
-        else:
-            rows=con.execute(sale_select,(user['id'],)).fetchall()
-            rows_pagination=None
-        active_count=con.execute("""SELECT COUNT(*) FROM sales s
-            WHERE s.user_id=? AND NOT EXISTS(
-                SELECT 1 FROM sale_cancellations c WHERE c.sale_id=s.id)""",
-            (user['id'],)).fetchone()[0]
-        financial = calculate_financial_snapshot(con)
-        customer_context = customer_identity_context(con)
-        obligations = worker_snapshot_obligations(financial, user['id'])
-        obligations_by_sale = {item['id']: item for item in obligations}
-        display_rows = []
-        for row in rows:
-            current_name, current_phone = customer_display(
-                customer_context, row['customer'], row['customer_phone'])
-            display_rows.append(dict(row, customer=current_name, customer_phone=current_phone,
-                financial_balance=obligations_by_sale.get(row['id'], {}).get('balance', Decimal('0')),
-                legacy_estimated_amount=obligations_by_sale.get(row['id'], {}).get('legacy_applied', Decimal('0'))))
-        rows = display_rows
-        channel_balances = worker_channel_balances(con,user['id'])
-        balance = round(sum(channel_balances.values()), 2)
-        recent_receipts = con.execute("""SELECT r.date, r.amount, r.payment_method, s.customer,
-                        s.customer_phone, s.product
-                        FROM worker_receipts r JOIN sales s ON s.id=r.sale_id
-                        WHERE r.worker_id=? ORDER BY r.id DESC LIMIT 30""", (user['id'],)).fetchall()
-        opening_recent = con.execute("""SELECT r.date,r.amount,r.payment_method,d.customer,d.customer_phone,
-                'Eski qarz' product FROM opening_debt_receipts r
-                JOIN opening_debts d ON d.id=r.opening_debt_id
-                WHERE r.worker_id=? AND r.received_by='worker' ORDER BY r.id DESC LIMIT 30""", (user['id'],)).fetchall()
-        recent_receipts = [
-            dict(row, customer=customer_display(
-                customer_context, row['customer'], row['customer_phone'])[0])
-            for row in list(recent_receipts) + list(opening_recent)
-        ]
-        recent_receipts.sort(key=lambda row: _business_date(row['date'])[0],reverse=True)
-        recent_receipts = recent_receipts[:30]
-        expenses = [expense_display(row) for row in con.execute("""SELECT e.*,
-                        entered.username AS entered_by_name, source.role AS source_role
-                        FROM expenses e
-                        LEFT JOIN users entered ON entered.id=COALESCE(e.entered_by,e.user_id)
-                        LEFT JOIN users source ON source.id=e.user_id
-                        WHERE e.user_id=? ORDER BY e.id DESC LIMIT 30""", (user['id'],))]
-        transfers = con.execute('SELECT * FROM worker_transfers WHERE worker_id=? ORDER BY id DESC LIMIT 30',(user['id'],)).fetchall()
-    active = [r for r in rows if not r['cancelled']]
-    total_debt = sum((item['balance'] for item in obligations), Decimal('0'))
-    groups = {}
-    for item in obligations:
-        if item['balance'] <= Decimal('0.009'):
-            continue
-        key = (item['customer'].strip(), item['phone'])
-        group = groups.setdefault(key, {'debt': Decimal('0'), 'legacy_estimated': Decimal('0')})
-        group['debt'] += item['balance']
-        group['legacy_estimated'] += item['legacy_applied']
-    debt_groups = [{
-        'customer': name, 'phone': phone, 'debt': round(amounts['debt'], 2),
-        'legacy_estimated_amount': round(amounts['legacy_estimated'], 2),
-        'payment_blocked': snapshot_has_ambiguous_legacy(financial, name),
-    } for (name, phone), amounts in sorted(groups.items())]
-    legacy_payment_warning = any(item['payment_blocked'] for item in debt_groups)
-    if request.endpoint == 'worker_debts':
-        debt_groups,debt_groups_pagination=paginate_items(
-            debt_groups,'debt_page','debt_per_page')
-    else:
-        debt_groups_pagination=None
-    legacy_estimated_total = sum((item['legacy_applied'] for item in obligations), Decimal('0'))
-    return dict(rows=rows, products=WORKER_PRODUCTS[user['role']], role_name=ROLES[user['role']],
-                 balance=balance, channel_balances=channel_balances, payment_methods=PAYMENT_METHODS,
-                 recent_receipts=recent_receipts, expenses=expenses, transfers=transfers, bag_options=BAG_OPTIONS,
-                loose_products=LOOSE_PRODUCTS, active_count=active_count, total_debt=total_debt,
-                debt_groups=debt_groups, legacy_estimated_total=legacy_estimated_total,
-                legacy_payment_warning=legacy_payment_warning,
-                rows_pagination=rows_pagination,
-                debt_groups_pagination=debt_groups_pagination)
+    return build_worker_context(
+        user=user, endpoint=request.endpoint, db_factory=db,
+        paginate_rows=paginate_rows, paginate_items=paginate_items,
+        calculate_financial_snapshot=calculate_financial_snapshot,
+        customer_identity_context=customer_identity_context,
+        worker_snapshot_obligations=worker_snapshot_obligations,
+        customer_display=customer_display,
+        worker_channel_balances=worker_channel_balances,
+        expense_display=expense_display,
+        snapshot_has_ambiguous_legacy=snapshot_has_ambiguous_legacy,
+        _business_date=_business_date,
+        WORKER_PRODUCTS=WORKER_PRODUCTS, ROLES=ROLES,
+        PAYMENT_METHODS=PAYMENT_METHODS, BAG_OPTIONS=BAG_OPTIONS,
+        LOOSE_PRODUCTS=LOOSE_PRODUCTS,
+        debt_query=request.args.get('q', '') if request.endpoint == 'worker_debts' else '',
+    )
 
 @app.route('/xodim/sotuvlar')
 @login_required
@@ -1345,14 +792,11 @@ def worker_sales():
 def worker_stock_status():
     user=current_user()
     if user['role'] not in WORKER_PRODUCTS: abort(403)
-    with db() as con:
-        stocks=product_stocks(con)
-        bag_stocks=bagged_product_stocks(con)
-    products=WORKER_PRODUCTS[user['role']]
-    return {
-        'stocks': {p: round(float(stocks.get(p,0)), 4) for p in products},
-        'bag_stocks': {p:bag_stocks[p] for p in products if p in bag_stocks},
-    }
+    return load_worker_stock_status(
+        user=user, db_factory=db, product_stocks=product_stocks,
+        bagged_product_stocks=bagged_product_stocks,
+        worker_products=WORKER_PRODUCTS,
+    )
 
 
 @app.route('/xodim/yangi-sotuv-sahifa')
@@ -1385,17 +829,15 @@ def worker_cash_page():
 @app.route('/xodim/xaridor-qidirish')
 @login_required
 def worker_customer_search():
-    user=current_user()
-    if user['role'] not in WORKER_PRODUCTS: abort(403)
-    q=request.args.get('q','').strip()[:80]
-    if len(q)<2: return {'customers': []}
-    digits=re.sub(r'\D','',q)
-    with db() as con:
-        if len(digits)>=3 and len(digits)>=len(q.replace(' ', '').replace('+','').replace('-','')):
-            rows=con.execute('SELECT id,name,phone FROM customers WHERE phone_key LIKE ? ORDER BY name LIMIT 12',('%'+digits+'%',)).fetchall()
-        else:
-            rows=con.execute('SELECT id,name,phone FROM customers WHERE name LIKE ? COLLATE NOCASE ORDER BY name LIMIT 12',('%'+q+'%',)).fetchall()
-    return {'customers':[dict(r) for r in rows]}
+    # DC_CUSTOMER_AUTOCOMPLETE_20261110: read-only shared lookup
+    from customer_autocomplete_service import find_customers
+    user = current_user()
+    if user['role'] not in ('buxgalter', 'rahbar', 'umid', 'maxmud'):
+        abort(403)
+    with closing(db()) as con:
+        matches = find_customers(con, request.args.get('q', ''),
+                                 user['role'], user['id'])
+    return {'customers': matches}, 200, {'Cache-Control': 'no-store'}
 
 @app.route('/xodim/xaridor-tahrirlash', methods=['POST'])
 @login_required
@@ -2160,7 +1602,7 @@ def boss_statistics():
                 financial_warnings.append({'code': 'same_name_multiple_phones', 'customer': name})
         expenses = con.execute("SELECT COALESCE(SUM(amount),0) FROM expenses").fetchone()[0]
         purchased = con.execute('SELECT COALESCE(SUM(net),0) FROM wheat_receipts').fetchone()[0]
-        used = con.execute('SELECT COALESCE(SUM(COALESCE(raw_wheat_kg,wheat_kg)),0) FROM production').fetchone()[0]
+        used = rop.wheat_warehouse_used(con)
         stocks = [('Bug‘doy', purchased-used)] + list(product_stocks(con).items())
         bagged_stocks=bagged_product_stocks(con)
         from cashflow_analytics import calculate_cashflow_analytics
@@ -2280,7 +1722,7 @@ def wheat():
             'SELECT COUNT(*) FROM wheat_receipts',
         )
         total=con.execute('SELECT COALESCE(SUM(net),0) FROM wheat_receipts').fetchone()[0]
-        used=con.execute('SELECT COALESCE(SUM(COALESCE(raw_wheat_kg,wheat_kg)),0) FROM production').fetchone()[0]
+        used=rop.wheat_warehouse_used(con)
         from cashflow_analytics import calculate_cashflow_analytics
         cashflow=calculate_cashflow_analytics(con)
         accountant_cash=cashflow['accounts']['buxgalter']['closing_channels']
@@ -2291,6 +1733,48 @@ def wheat():
     return render_template('wheat.html', rows=rows, stock=total-used,
                            accountant_cash=accountant_cash,pagination=pagination,
                            opening_wheat_stock=opening_wheat_stock)
+
+@app.route('/bugdoy/xarid/<int:receipt_id>/tahrir', methods=['GET', 'POST'])
+@login_required
+def edit_wheat_purchase_metadata(receipt_id):
+    # DC-001A: metadata-only edit; money/stock/date edits require separate safeguards.
+    if current_user()['role'] != 'buxgalter':
+        abort(403)
+    from wheat_purchase_edit_service import snapshot_hash, update_purchase_metadata
+    from itsdangerous import URLSafeSerializer, BadSignature
+    signer = URLSafeSerializer(app.secret_key, salt='wheat-purchase-metadata-v1')
+    if request.method == 'POST':
+        try:
+            token = signer.loads(request.form.get('edit_token', ''))
+            if (not isinstance(token, dict) or token.get('action') != 'wheat_metadata'
+                    or token.get('receipt_id') != receipt_id
+                    or token.get('actor_id') != session['user_id']):
+                raise ValueError('Tahrirlash formasi yaroqsiz. Qayta oching.')
+            with db() as con:
+                con.execute('BEGIN IMMEDIATE')
+                outcome = update_purchase_metadata(
+                    con, receipt_id, session['user_id'], token.get('snapshot'),
+                    request.form.get('supplier', ''), request.form.get('note', ''))
+            if outcome == 'updated':
+                flash('Xaridning yetkazuvchisi va izohi yangilandi; pul va ombor hisobi o‘zgarmadi.', 'success')
+            else:
+                flash('O‘zgartirish mavjud emas.', 'success')
+            return redirect(url_for('wheat'))
+        except (ValueError, BadSignature, sqlite3.Error) as exc:
+            flash(str(exc) or 'Tahrirlash saqlanmadi.', 'error')
+            return redirect(url_for('edit_wheat_purchase_metadata', receipt_id=receipt_id))
+    with db() as con:
+        record = con.execute('SELECT * FROM wheat_receipts WHERE id=?',
+                             (receipt_id,)).fetchone()
+    if record is None:
+        abort(404)
+    if record['purchase_method'] == OPENING_WHEAT_METHOD:
+        abort(403)
+    edit_token = signer.dumps({'action': 'wheat_metadata', 'receipt_id': receipt_id,
+                               'actor_id': session['user_id'],
+                               'snapshot': snapshot_hash(record)})
+    return render_template('wheat_purchase_edit.html', receipt=record,
+                           edit_token=edit_token)
 
 @app.route('/bugdoy/boshlangich-zaxira', methods=['POST'])
 @login_required
@@ -2344,151 +1828,388 @@ def add_opening_wheat_stock():
         flash('Boshlang‘ich bug‘doy zaxirasi saqlanmadi; ombor va kassa o‘zgarmadi.', 'error')
     return redirect(url_for('wheat'))
 
-@app.context_processor
-def production_context():
-    def production_token():
-        return URLSafeSerializer(app.secret_key, salt='production-operation-v1').dumps({
-            'action': 'production', 'user_id': session['user_id'],
-            'nonce': secrets.token_urlsafe(32)})
-    return {'production_token': production_token}
+def zachiska_inventory(con, day):
+    warnings = []
+    snapshot = _monthly_historical_snapshot(
+        con, date.fromisoformat(day), warnings, inventory_only=True)
+    if warnings:
+        raise ValueError('Omborda sanasi noaniq yozuvlar bor. Zachiskadan oldin tekshiring.')
+    return rop.finished_counts(snapshot['stocks'], snapshot['bags'])
 
 
-@app.route('/ishlab-chiqarish', methods=['GET','POST'])
+def production_form_values(form, *, editing=False):
+    unit = 'kg' if editing else form.get('unit', 'tonna')
+    if unit not in ('kg', 'tonna'):
+        raise ValueError('O‘lchov birligi noto‘g‘ri.')
+    note = form.get('note', '').strip()
+    if len(note) > 500:
+        raise ValueError('Izoh 500 belgidan oshmasin.')
+    def quantity(field, label, multiplier=1):
+        value = form.get(field)
+        return amount(value if editing else value or 0, label, multiplier=multiplier)
+
+    return {
+        'wheat_kg': amount(form.get('cleaned_wheat'), 'Tozalangan bug‘doy', positive=True,
+                           multiplier=1000 if unit == 'tonna' else 1),
+        'bulk_kg': quantity('bulk_kg', 'Bunker uni') if editing else
+                   quantity('bulk_flour_tons', 'Bunker uni', 1000),
+        'black_kg': quantity('black_kg', 'Qora un'),
+        'bran_kg': quantity('bran_kg', 'Kepak'),
+        'muchka_kg': quantity('muchka_kg', 'Muchka'),
+        'telashka_kg': quantity('telashka_kg', 'Telashka atxod'),
+        'note': note,
+    }
+
+
+@app.route('/ishlab-chiqarish', methods=['GET', 'POST'])
 @login_required
 def production_page():
-    role = current_user()['role']
-    if role not in ('umid', 'rahbar'):
+    user = current_user()
+    if request.method == 'POST':
+        if user['role'] != 'buxgalter':
+            abort(403)
+        try:
+            action = request.form.get('action', 'rop_production')
+            with closing(db()) as con, con:
+                con.execute('BEGIN IMMEDIATE')
+                token, payload, previous, claim = check_remaining_operation(con, action)
+                if previous:
+                    flash('Bu operatsiya avval saqlangan.', 'success')
+                    return redirect(url_for('production_page'))
+                period = rop.latest_period(con)
+                state = claim['state']
+                if state.get('period_id') != (period['id'] if period else None):
+                    raise ValueError('ROP davri o‘zgargan. Formani qayta oching.')
+                date_value = _html_date_storage(request.form.get('date', ''))
+                day = _business_date_key(date_value)
+                note = request.form.get('note', '').strip()
+                if len(note) > 500:
+                    raise ValueError('Izoh 500 belgidan oshmasin.')
+                if action == 'rop_receive':
+                    result_id = rop.receive(con, day, request.form.get('qty_kg'),
+                                            request.form.get('source', 'direct'), note, user['id'],
+                                            transfer_document=request.form.get('transfer_document'))
+                    message = 'ROP kirimi saqlandi.'
+                elif action == 'rop_production':
+                    quantities = production_form_values(request.form)
+                    period_id = rop.production_period(con, day)
+                    result_id = save_production(con, date_value, quantities['wheat_kg'],
+                                                quantities['bulk_kg'], quantities['black_kg'],
+                                                quantities['bran_kg'], quantities['muchka_kg'],
+                                                quantities['telashka_kg'], note, user['id'], period_id)
+                    message = 'Kunlik tozalangan bug‘doy va ishlab chiqarish saqlandi.'
+                elif action == 'rop_measure':
+                    result_id = rop.measure(con, day, request.form.get('qty_kg'),
+                                            request.form.get('document_ref'), user['id'])
+                    message = 'Hujjatli fizik ROP sanoqi saqlandi.'
+                elif action in ('rop_grain_waste', 'rop_grain_waste_edit'):
+                    result_id = rop.save_grain_waste(
+                        con, period, day, request.form, user['id'],
+                        receipt_id=state['receipt_id'] if action.endswith('_edit') else None,
+                        revision=state['revision'] if action.endswith('_edit') else None)
+                    message = 'Зерно отход nakladnoyi saqlandi.'
+                elif action == 'rop_approve':
+                    if state.get('stop_day') != day:
+                        raise ValueError('To‘xtash sanasini qayta tekshiring.')
+                    revisions = [rop_forms.get(con, period['id'], number)[0] for number in (34,117)] if period else [0,0]
+                    if state.get('form_revisions', [0,0]) != revisions:
+                        raise ValueError('34 yoki 117-shakl o‘zgargan. Balansni qayta tekshiring.')
+                    report_month = rop.report_month_start(
+                        request.form.get('report_month'), day).isoformat()[:7]
+                    if state.get('report_month', day[:7]) != report_month:
+                        raise ValueError('Hisobot oyi o‘zgargan. Balansni qayta tekshiring.')
+                    rop.validate_stop(con, period, day)
+                    # BEGIN IMMEDIATE excludes writers while a separate reader copies
+                    # the committed inventory as of the actual stop day.
+                    with closing(db()) as reader:
+                        expected = zachiska_inventory(reader, day)
+                    result_id = rop.approve(con, period, day, request.form, expected, user['id'],
+                                            report_month=report_month)
+                    message = 'Yagona zachiska tasdiqlandi.'
+                else:
+                    raise ValueError('Amal noto‘g‘ri.')
+                save_remaining_operation(con, action, token, payload, result_id)
+            flash(message, 'success')
+        except (ValueError, KeyError, OverflowError) as exc:
+            flash(str(exc) or 'Ishlab chiqarish ma’lumotlarini tekshiring.', 'error')
+        except sqlite3.Error:
+            flash('Operatsiya saqlanmadi. Sana va ma’lumotlarni tekshiring.', 'error')
+        stop_day = request.form.get('date') if request.form.get('action') == 'rop_approve' else None
+        return redirect(url_for('production_page', stop_day=stop_day,
+                                report_month=request.form.get('report_month') if stop_day else None))
+
+    con=db()
+    try:
+        rows,pagination=paginate_rows(con,'''SELECT p.*, r.period_id AS rop_period_id
+            FROM production p LEFT JOIN rop_production r ON r.production_id=p.id ORDER BY p.id DESC''',
+                                      'SELECT COUNT(*) FROM production')
+        total=con.execute('SELECT COALESCE(SUM(net),0) FROM wheat_receipts').fetchone()[0]
+        used=rop.wheat_warehouse_used(con)
+        bulk_available=bunker_balance(con)
+        period = rop.latest_period(con)
+        measurement = rop.latest_measurement(con, period)
+        active = period is not None and period['stop_day'] is None
+        totals = rop.period_totals(con, period) if active else None
+        revision34, form34 = rop_forms.get(con, period['id'], 34) if active else (0,{})
+        revision117, form117_doc = rop_forms.get(con, period['id'], 117) if active else (0,{})
+        waste_receipts = con.execute('''SELECT * FROM rop_grain_waste WHERE period_id=?
+            ORDER BY day DESC,id DESC''', (period['id'],)).fetchall() if active else []
+        waste_kg = rop.grain_waste_summary(con, period['id'], date.today().isoformat())['kg'] if active else None
+        receipts = con.execute('''SELECT r.*, u.username, d.document_ref FROM rop_receipts r
+            JOIN users u ON u.id=r.user_id
+            LEFT JOIN rop_transfer_documents d ON d.receipt_id=r.id
+            ORDER BY r.id DESC LIMIT 30''').fetchall()
+        approvals = con.execute('''SELECT p.*, u.username FROM rop_periods p
+            JOIN users u ON u.id=p.approved_by ORDER BY p.id DESC''').fetchall()
+        approved = [(row, json.loads(row['reconciliation'])) for row in approvals]
+        stop_day = request.args.get('stop_day')
+        report_month = request.args.get('report_month')
+        finished = None
+        if stop_day and active:
+            try:
+                stop_day = _business_date_key(_html_date_storage(stop_day))
+                report_month = rop.report_month_start(report_month or None, stop_day).isoformat()[:7]
+                rop.validate_stop(con, period, stop_day)
+                finished = zachiska_inventory(con, stop_day)
+            except (ValueError, sqlite3.Error) as exc:
+                flash(str(exc), 'error')
+        # Preserve historic bagging history from the old single-step process.
+        ids=[r['id'] for r in rows]
+        bag_lines={}
+        if ids:
+            placeholders=','.join('?' for _ in ids)
+            for line in con.execute(
+                'SELECT production_id,product,bag_kg,bag_count FROM bagged_production_lines '
+                f'WHERE production_id IN ({placeholders}) ORDER BY product,bag_kg',ids):
+                bag_lines.setdefault(line['production_id'],[]).append(line)
+    finally:
+        con.close()
+    return render_template('production.html',rows=rows,pagination=pagination,
+                           stock=total-used,bunker_kg=bulk_available,bag_lines=bag_lines,
+                           period=period, active=active, measurement=measurement, totals=totals,
+                           receipts=receipts, approved=approved, stop_day=stop_day, report_month=report_month,
+                           finished=finished, loss_fields=rop.LOSS_FIELDS,
+                           rop_adjustments=rop.ROP_ADJUSTMENTS,
+                           waste_receipts=waste_receipts, waste_kg=waste_kg,
+                           form34_saved=bool(form34), form117_saved=bool(form117_doc),
+                           form_revisions=[revision34,revision117],
+                           form117_outputs=rop.form117.OUTPUT_LABELS,
+                           form117_corrections=rop.form117.CORRECTION_LABELS,
+                           today=date.today().isoformat())
+
+@app.get('/ishlab-chiqarish/zachiska/<int:period_id>/117')
+@login_required
+def zachiska_print(period_id):
+    with closing(db()) as con:
+        con.execute('PRAGMA query_only=ON')
+        con.execute('BEGIN')
+        period = con.execute('SELECT * FROM rop_periods WHERE id=?', (period_id,)).fetchone()
+        if period is None:
+            abort(404)
+        try:
+            draft = build_zachiska_draft(
+                con, period, request.args.get('stop_day'), request.args.get('report_month'))
+        except ValueError as exc:
+            abort(400, description=str(exc))
+    return render_template('zachiska_print.html', **draft), {'Cache-Control': 'private, no-store'}
+
+
+@app.route('/ishlab-chiqarish/zachiska/<int:period_id>/shakl/<int:number>', methods=['GET','POST'])
+@login_required
+def rop_form_document(period_id, number):
+    if number not in (34, 117):
+        abort(404)
+    user = current_user()
+    if request.method == 'POST' and user['role'] != 'buxgalter':
         abort(403)
-    if role == 'rahbar' and request.method != 'GET':
-        abort(403)
+    output = request.args.get('output')
+    with closing(db()) as con:
+        if request.method == 'POST':
+            con.execute('BEGIN IMMEDIATE')
+        else:
+            con.execute('PRAGMA query_only=ON')
+            con.execute('BEGIN')
+        period = con.execute('SELECT * FROM rop_periods WHERE id=?', (period_id,)).fetchone()
+        if period is None:
+            abort(404)
+        if request.method == 'POST':
+            try:
+                rop_forms.save(con, period, number, int(request.form.get('revision','-1')), request.form, user['id'])
+                con.commit()
+            except ValueError as exc:
+                con.rollback()
+                flash(str(exc) or 'Hujjat qiymatlarini tekshiring.', 'error')
+            else:
+                flash(f'{number}-shakl saqlandi.', 'success')
+            return redirect(url_for('rop_form_document', period_id=period_id, number=number))
+        revision, values = rop_forms.get(con, period_id, number)
+        closed = period['stop_day'] is not None
+        saved = json.loads(period['reconciliation'] or '{}') if closed else {}
+        _, quality34 = rop_forms.get(con, period_id, 34)
+        cutoff = period['stop_day'] or date.today().isoformat()
+        ledger_end = quality34.get('end_day', cutoff)
+        ledger_start = quality34.get('start_day', period['start_day'])
+        ledger = con.execute('''SELECT ROUND(SUM(qty_kg),3) FROM rop_grain_waste
+            WHERE period_id=? AND day BETWEEN ? AND ?''',
+            (period_id, ledger_start, ledger_end)).fetchone()[0]
+        ledger_rows = con.execute('''SELECT day, document_ref, qty_kg FROM rop_grain_waste
+            WHERE period_id=? AND day BETWEEN ? AND ? ORDER BY day,id''',
+            (period_id, ledger_start, ledger_end)).fetchall()
+        totals = saved if closed else rop.period_totals(con, period)
+        measured = totals.get('cleaned') or None
+    report = saved.get('form117_yield') if closed else None
+    basis = quality34.get('clean_kg') if quality34 else measured
+    issue = None
+    if number == 117 and values and not closed:
+        try:
+            report = rop_forms.yield_report(values, basis)
+        except ValueError as exc:
+            issue = str(exc)
+    if number == 117 and closed:
+        values = {'report_month': saved.get('report_month') or '', **values}
+    linked34 = rop_forms.document_status(34, quality34, ledger_kg=ledger) == 'TASDIQLANGAN'
+    status = rop_forms.document_status(number, values, ledger_kg=ledger, report=report,
+                                       linked34=linked34, closed=closed)
+    headers = {'Cache-Control': 'private, no-store'}
+    if output in ('print','download'):
+        if number == 34:
+            data = rop_form_exports.form34_context(values, period_id=period_id, ledger_kg=ledger, status=status)
+            if output == 'print':
+                return render_template('rop_form34_print.html', data=data, period=period,
+                                       grain=rop_forms.GRAIN,waste=rop_forms.WASTE,
+                                       waste_columns=rop_forms.WASTE_COLUMNS, signs=rop_forms.SIGNS[34]), headers
+            stream = rop_form_exports.form34_download(data)
+            extension = 'docx'
+        else:
+            book, display = rop_form_exports.form117_workbook(values,quality34,report,status,basis)
+            if output == 'print':
+                grid,widths = rop_form_exports.print_grid(book.active,display)
+                return render_template('rop_form117_print.html', grid=grid,widths=widths,
+                                       period=period,status=status,issue=issue), headers
+            stream = rop_form_exports.workbook_download(book,display)
+            extension = 'xlsx'
+        response = send_file(stream, as_attachment=True, download_name=f'{number}-shakl-ROP-{period_id}.{extension}')
+        response.headers.update(headers)
+        return response
+    return render_template('rop_form_edit.html', number=number, period=period, groups=rop_forms.fields(number),
+                           values=values, revision=revision, status=status, issue=issue, measured=measured,
+                           basis=basis, linked34=bool(quality34), ledger=ledger, ledger_rows=ledger_rows,
+                           editable=not closed and user['role']=='buxgalter'), headers
+
+
+@app.route('/ishlab-chiqarish/<int:production_id>/tahrir', methods=['GET', 'POST'])
+@login_required
+def edit_rop_production(production_id):
+    user = current_user()
     if request.method == 'POST':
         try:
-            unit = request.form.get('unit', 'tonna')
-            if unit not in ('kg', 'tonna'): raise ValueError()
-            try:
-                production_date = _html_date_storage(
-                    request.form.get('date') or date.today().isoformat()
-                )
-            except ValueError as exc:
-                flash(f'Ishlab chiqarish sanasi yaroqsiz: {exc}', 'error')
-                return redirect(url_for('production_page'))
-            factor = 1000 if unit == 'tonna' else 1
-            raw = float(request.form['raw_wheat']) * factor
-            w = float(request.form['cleaned_wheat']) * factor
-            f = float(request.form.get('flour_kg',0))
-            b = float(request.form.get('bran_kg',0))
-            m = float(request.form.get('muchka_kg',0))
-            t = float(request.form.get('telashka_kg',0))
-            flour_types = {p: float(request.form.get('flour_'+str(i), 0) or 0) for i,p in enumerate(FLOUR_TYPES)}
-            bag_products = request.form.getlist('bag_product')
-            bag_sizes = request.form.getlist('bag_kg')
-            bag_counts = request.form.getlist('bag_count')
-            if not (len(bag_products) == len(bag_sizes) == len(bag_counts)):
-                raise ValueError('Qop ishlab chiqarish qatorlarini tekshiring.')
-            bag_lines = {}
-            for product, raw_size, raw_count in zip(bag_products, bag_sizes, bag_counts):
-                if product not in BAGGED_FLOUR_PRODUCTS:
-                    raise ValueError('Qopli mahsulot turi noto‘g‘ri.')
-                try:
-                    size_value = float(raw_size)
-                    count_value = float(raw_count) if raw_count.strip() else 0
-                except (TypeError, ValueError, OverflowError) as exc:
-                    raise ValueError('Qop o‘lchami va sonini tekshiring.') from exc
-                if (not math.isfinite(size_value) or size_value not in (25, 50)
-                        or not math.isfinite(count_value) or count_value < 0
-                        or count_value != int(count_value)):
-                    raise ValueError('Qop o‘lchami 25 yoki 50 kg, qop soni esa musbat butun son bo‘lsin.')
-                if count_value == 0:
-                    continue
-                key = (product, int(size_value))
-                bag_lines[key] = bag_lines.get(key, 0) + int(count_value)
-                flour_types[product] += size_value * count_value
-            if not all(math.isfinite(value) for value in (raw,w,f,b,m,t,*flour_types.values())):
-                raise ValueError()
-            f = sum(flour_types.values())
-            if not math.isfinite(f): raise ValueError()
-            if min(flour_types.values()) < 0: raise ValueError()
-            if raw <= 0 or w <= 0 or w > raw or min(f,b,m,t) < 0 or f+b+m+t > w or f+b+m+t <= 0:
-                raise ValueError()
-            saved = False
-            with db() as con:
+            with closing(db()) as con, con:
                 con.execute('BEGIN IMMEDIATE')
-                token = request.form.get('operation_token', '')
-                try:
-                    operation = URLSafeSerializer(app.secret_key, salt='production-operation-v1').loads(token)
-                except BadSignature:
-                    raise ValueError('Ishlab chiqarish tokeni yaroqsiz.')
-                if (not isinstance(operation, dict) or operation.get('action') != 'production'
-                        or operation.get('user_id') != session['user_id']):
-                    raise ValueError('Token bu foydalanuvchiga tegishli emas.')
-                # Bind all submitted production inputs, excluding CSRF and the operation token.
-                payload = json.dumps({key: request.form.getlist(key) for key in request.form
-                    if key not in ('csrf_token', 'operation_token')},
-                    ensure_ascii=False, sort_keys=True, separators=(',', ':'))
-                previous = con.execute('SELECT * FROM production_operations WHERE token=?', (token,)).fetchone()
+                action = 'rop_production_edit'
+                token, payload, previous, claim = check_remaining_operation(con, action)
+                state = claim['state']
+                if state.get('production_id') != production_id:
+                    raise ValueError('Token boshqa ishlab chiqarish yozuviga tegishli.')
                 if previous:
-                    if previous['user_id'] != session['user_id'] or previous['payload'] != payload:
-                        raise ValueError('Bu token boshqa ishlab chiqarish mazmuni uchun ishlatilgan.')
-                    loss = raw - w
-                    flash(f'Ishlab chiqarish saqlandi. Tozalash kamayishi: {loss/1000:.3f} t ({loss/raw*100:.2f}%).', 'success')
-                    return redirect(url_for('production_page'))
-                stock=con.execute('''SELECT
-                    (SELECT COALESCE(SUM(net),0) FROM wheat_receipts)
-                    - (SELECT COALESCE(SUM(COALESCE(raw_wheat_kg,wheat_kg)),0) FROM production)''').fetchone()[0]
-                if raw > stock + 0.000001:
-                    flash('Umumiy bug‘doy zaxirasida yetarli qoldiq yo‘q.', 'error')
+                    flash('Tahrir avval saqlangan.', 'success')
                 else:
-                    con.execute('''INSERT INTO production
-                        (date,wheat_kg,raw_wheat_kg,flour_kg,bran_kg,note,user_id,muchka_kg,telashka_kg)
-                        VALUES(?,?,?,?,?,?,?,?,?)''',
-                        (production_date,w,raw,f,b,
-                         request.form.get('note','').strip(),session['user_id'],m,t))
-                    pid = con.execute('SELECT last_insert_rowid()').fetchone()[0]
-                    for product, kg in flour_types.items():
-                        if kg: con.execute('INSERT INTO production_flour_types(production_id,product,qty_kg) VALUES(?,?,?)', (pid,product,kg))
-                    for (product, bag_kg), bag_count in bag_lines.items():
-                        con.execute('''INSERT INTO bagged_production_lines
-                            (production_id,product,bag_kg,bag_count) VALUES(?,?,?,?)''',
-                            (pid,product,bag_kg,bag_count))
-                    con.execute('INSERT INTO production_operations(token,user_id,payload,production_id) VALUES(?,?,?,?)',
-                                (token,session['user_id'],payload,pid))
-                    saved = True
-            if saved:
-                loss = raw - w
-                flash(f'Ishlab chiqarish saqlandi. Tozalash kamayishi: {loss/1000:.3f} t ({loss/raw*100:.2f}%).', 'success')
-                return redirect(url_for('production_page'))
+                    row = production_edit.record(con, production_id)
+                    if row is None:
+                        abort(404)
+                    if state.get('revision') != row['revision']:
+                        raise ValueError('Yozuv o‘zgargan. Joriy qiymatlarni qayta tekshiring.')
+                    audit_id = production_edit.apply(
+                        con, row, production_form_values(request.form, editing=True),
+                        request.form.get('reason', '').strip(), user['id'])
+                    save_remaining_operation(con, action, token, payload, audit_id)
+                    flash('Ishlab chiqarish yozuvi tahrirlandi.', 'success')
+        except ValueError as exc:
+            flash(str(exc), 'error')
         except sqlite3.Error:
-            flash("Ishlab chiqarish saqlanmadi. Shu so‘rovni qayta yuboring.", 'error')
-        except (ValueError, KeyError):
-            flash('Vaznlarni tekshiring: tozalangan vazn olingan vazndan oshmasin, mahsulotlar jami esa tozalangan vazndan oshmasin.', 'error')
-    with db() as con:
-        rows,pagination=paginate_rows(
-            con, 'SELECT * FROM production ORDER BY id DESC',
-            'SELECT COUNT(*) FROM production',
-        )
-        bag_lines = {}
-        production_ids=[row['id'] for row in rows]
-        if production_ids:
-            placeholders=','.join('?' for _ in production_ids)
-            bagged_sql=f"""SELECT production_id,product,bag_kg,bag_count
-                FROM bagged_production_lines
-                WHERE production_id IN ({placeholders})
-                ORDER BY product,bag_kg"""
-            bagged_params=production_ids
-        else:
-            bagged_sql=None
-            bagged_params=()
-        for line in (con.execute(bagged_sql,bagged_params) if bagged_sql else ()):
-            bag_lines.setdefault(line['production_id'],[]).append({
-                'product':line['product'],'bag_kg':line['bag_kg'],
-                'bag_count':line['bag_count'],
-                'qty_kg':line['bag_kg']*line['bag_count'],
-            })
-        total=con.execute('SELECT COALESCE(SUM(net),0) FROM wheat_receipts').fetchone()[0]
-        used=con.execute('SELECT COALESCE(SUM(COALESCE(raw_wheat_kg,wheat_kg)),0) FROM production').fetchone()[0]
-    return render_template('production.html', rows=rows, stock=total-used,
-        flour_types=FLOUR_TYPES, bagged_flour_products=BAGGED_FLOUR_PRODUCTS,
-        bag_lines=bag_lines,pagination=pagination)
+            flash('Tahrir saqlanmadi. Yozuvlar va sanalarni tekshiring.', 'error')
+        return redirect(url_for('edit_rop_production', production_id=production_id))
+    with closing(db()) as con:
+        con.execute('BEGIN')
+        row = production_edit.record(con, production_id)
+        if row is None:
+            abort(404)
+        audit = con.execute('''SELECT e.*, u.username FROM rop_production_edits e
+            JOIN users u ON u.id=e.user_id WHERE e.production_id=? ORDER BY e.id DESC''',
+                            (production_id,)).fetchall()
+    return render_template('production_edit.html', row=row,
+                           can_edit=user['role'] == 'buxgalter' and row['stop_day'] is None,
+                           changes=[(e, json.loads(e['previous_values']), json.loads(e['new_values']))
+                                    for e in audit])
+
+
+@app.context_processor
+def packaging_context():
+    def packaging_token():
+        return URLSafeSerializer(app.secret_key,salt='flour-packaging-v1').dumps({
+            'action':'packaging','user_id':session['user_id'], 'nonce':secrets.token_urlsafe(32)})
+    return {'packaging_token':packaging_token}
+
+@app.route('/un-qoplash', methods=['GET','POST'])
+@login_required
+def packaging_page():
+    user=current_user()
+    if user['role'] not in ('buxgalter','rahbar'): abort(403)
+    if request.method=='POST':
+        if user['role']!='buxgalter': abort(403)
+        con=db()
+        try:
+            action=request.form.get('action','package')
+            packaging_date=_html_date_storage(request.form.get('date') or date.today().isoformat())
+            con.execute('BEGIN IMMEDIATE')
+            if action=='opening':
+                rop.check_packaging_day(con, _business_date_key(packaging_date), action)
+                save_opening(con,amount(request.form.get('opening_tons'), 'Bunker qoldig‘i', multiplier=1000),
+                             packaging_date,user['id'],request.form.get('note','').strip())
+                message='Bunker boshlang‘ich qoldig‘i kiritildi.'
+            elif action=='package':
+                token=request.form.get('operation_token','')
+                try:
+                    token_data=URLSafeSerializer(app.secret_key,salt='flour-packaging-v1').loads(token)
+                except BadSignature as exc:
+                    raise ValueError('Qoplash tokeni yaroqsiz.') from exc
+                if (not isinstance(token_data,dict) or token_data.get('action')!='packaging'
+                        or token_data.get('user_id')!=user['id']):
+                    raise ValueError('Qoplash tokeni boshqa foydalanuvchiga tegishli.')
+                payload=json.dumps({k:request.form.getlist(k) for k in request.form
+                    if k not in ('csrf_token','operation_token')},ensure_ascii=False,sort_keys=True,separators=(',',':'))
+                previous = con.execute('SELECT 1 FROM flour_packaging WHERE token=?', (token,)).fetchone()
+                if not previous:
+                    rop.check_packaging_day(con, _business_date_key(packaging_date), action)
+                _,created=save_packaging(con,packaging_date,
+                    amount(request.form.get('withdrawn_tons'), 'Bunkerdan olingan un', multiplier=1000),
+                    request.form.getlist('bag_product'),request.form.getlist('bag_kg'),
+                    request.form.getlist('bag_count'),token,payload,user['id'],
+                    request.form.get('note','').strip(), pending_reconciliation=True)
+                message='Un qoplandi va tayyor omborga kirim qilindi.' if created else 'Qoplash avval saqlangan.'
+            else:
+                raise ValueError('Amal noto‘g‘ri.')
+            con.commit()
+            flash(message,'success')
+            return redirect(url_for('packaging_page'))
+        except (ValueError,KeyError,OverflowError,sqlite3.Error) as exc:
+            con.rollback()
+            flash(str(exc) or 'Qoplashni tekshiring.','error')
+            return redirect(url_for('packaging_page'))
+        finally:
+            con.close()
+    con=db()
+    try:
+        available=bunker_balance(con)
+        opening=con.execute('SELECT * FROM bunker_openings LIMIT 1').fetchone()
+        packaging,pagination=paginate_rows(con,'SELECT * FROM flour_packaging ORDER BY id DESC',
+                                            'SELECT COUNT(*) FROM flour_packaging')
+        period = rop.latest_period(con)
+    finally:
+        con.close()
+    return render_template('packaging.html',bunker_kg=available,opening=opening,
+                           packaging=packaging,bagged_products=BAGGED_FLOUR_PRODUCTS,
+                           period=period, active=period is not None and period['stop_day'] is None,
+                           pagination=pagination)
 
 @app.context_processor
 def accountant_sale_context():
@@ -2590,7 +2311,7 @@ def sales_page():
             current_name,current_phone=customer_display(
                 customer_context,row['customer'],row['customer_phone'])
             rows.append(dict(row,customer=current_name,customer_phone=current_phone))
-        customers=con.execute('SELECT name AS customer,phone AS customer_phone FROM customers ORDER BY name,id').fetchall()
+        customers=()  # DC_CUSTOMER_AUTOCOMPLETE_20261110: fetched on demand
         stocks=product_stocks(con)
         bagged_stocks=bagged_product_stocks(con)
         sale_workers = {role: [] for role in WORKER_PRODUCTS}
@@ -2618,39 +2339,9 @@ def invoice_saved(invoice_id):
 @app.route('/nakladnoylar')
 @login_required
 def invoices_page():
-    search=request.args.get('q','').strip()[:100]
-    search_conditions="""(
-        instr(lower(COALESCE(CAST(i.issued_date AS TEXT),'')),lower(?))>0 OR
-        instr(lower(substr(business_date_key(i.issued_date),9,2)||'.'||
-            substr(business_date_key(i.issued_date),6,2)||'.'||
-            substr(business_date_key(i.issued_date),1,4)),lower(?))>0 OR
-        instr(lower(CASE s.product
-            WHEN 'Robiya' THEN 'Oliy nav un'
-            WHEN 'Sara' THEN '1-nav un'
-            WHEN 'Yevro' THEN '1-nav un'
-            WHEN 'Zar Bug‘doy' THEN '1-nav un'
-            WHEN 'Telashka atxod' THEN 'Teleshka atxod'
-            ELSE s.product END),lower(?))>0 OR
-        instr(lower(COALESCE(s.customer,'')),lower(?))>0 OR
-        instr(lower(COALESCE(s.customer_phone,'')),lower(?))>0 OR
-        instr(lower(COALESCE(s.product,'')),lower(?))>0 OR
-        instr(printf('%.2f',COALESCE(s.qty_kg,0)),lower(?))>0 OR
-        instr(CAST(i.number AS TEXT),?)>0
-    )"""
-    search_params=(search,search,search,search,search,search,search,search)
-    with db() as con:
-        rows,pagination=paginate_rows(
-            con,
-            f"""SELECT i.*, s.customer, s.customer_phone, s.product, s.qty_kg
-                FROM invoices i JOIN sales s ON s.id=i.sale_id
-                WHERE {search_conditions}
-                ORDER BY business_date_key(i.issued_date) DESC, i.id DESC""",
-            f"""SELECT COUNT(*) FROM invoices i JOIN sales s ON s.id=i.sale_id
-                WHERE {search_conditions}""",
-            search_params,
-        )
-    return render_template('invoices.html', rows=rows, groups=INVOICE_GROUPS,
-        pagination=pagination,search=search)
+    return render_invoices_page(
+        INVOICE_GROUPS=INVOICE_GROUPS, db=db, paginate_rows=paginate_rows,
+        render_template=render_template, request=request)
 
 @app.route('/nakladnoy/<int:invoice_id>')
 @login_required
@@ -2721,73 +2412,7 @@ def edit_sale(sale_id):
                            edit_version_token=URLSafeSerializer(app.secret_key, salt='sale-edit-state-v1').dumps(edit_state),
                            bag_options=BAG_OPTIONS,loose_products=LOOSE_PRODUCTS)
 
-def customer_debt_details(con, customer):
-    """Oldest-first payment allocation across sales and opening debts."""
-    obligations = []
-    for r in con.execute("""SELECT id, date, due_date, qty_kg*price_per_kg-paid-COALESCE((SELECT SUM(wr.amount) FROM worker_receipts wr WHERE wr.sale_id=sales.id),0) balance
-                            FROM sales WHERE customer=? AND id NOT IN (SELECT sale_id FROM sale_cancellations)""", (customer,)):
-        due = r['due_date'] or _business_date_after(r['date'],25)
-        _business_date(due)
-        if r['balance'] > 0.009:
-            obligations.append({'kind':'sale', 'id':r['id'], 'date':r['date'], 'due_date':due, 'balance':float(r['balance'])})
-    for r in con.execute('''SELECT d.id,d.date,d.due_date,d.amount,
-             COALESCE((SELECT SUM(r.amount) FROM opening_debt_receipts r WHERE r.opening_debt_id=d.id),0) paid
-             FROM opening_debts d WHERE d.customer=?''', (customer,)):
-        _business_date(r['date'])
-        _business_date(r['due_date'])
-        remaining = float(r['amount'])-float(r['paid'])
-        if remaining>0.009:
-            obligations.append({'kind':'opening', 'id':r['id'], 'date':r['date'], 'due_date':r['due_date'], 'balance':remaining})
-    obligations.sort(key=lambda r: (_business_date(r['date'])[0], 0 if r['kind']=='opening' else 1, r['id']))
-    remaining_payments = float(con.execute('SELECT COALESCE(SUM(amount),0) FROM payments WHERE customer=?', (customer,)).fetchone()[0] or 0)
-    items = []
-    for obligation in obligations:
-        applied = min(obligation['balance'], max(0.0, remaining_payments))
-        remaining_payments -= applied
-        balance = obligation['balance'] - applied
-        if balance > 0.009:
-            items.append({'kind': obligation['kind'], 'id':obligation['id'], 'balance':balance, 'due_date':obligation['due_date']})
-    return items
 
-def debt_customers(con, financial=None, per_obligation=False):
-    # Debt pages and exports retain customer totals; control can classify each due separately.
-    if financial is None:
-        financial=calculate_financial_snapshot(con)
-    if financial is not None:
-        raw_phones = {}
-        customer_context=customer_identity_context(con)
-        if not per_obligation:
-            for table, kind in (('sales', 'sale'), ('opening_debts', 'opening')):
-                for row in con.execute('SELECT id,customer,customer_phone FROM '+table):
-                    raw_phones[(kind,row['id'])] = customer_display(
-                        customer_context,row['customer'],row['customer_phone'])[1]
-        result = []
-        for (name, phone), totals in financial['customers'].items():
-            if totals['debt'] <= 0:
-                continue
-            unpaid = [item for item in totals['obligations'] if item['balance'] > 0]
-            if per_obligation:
-                for item in unpaid:
-                    due = item['due_date'] or _business_date_after(item['date'], 25)
-                    card = customer_context['cards'].get(totals['customer_id'])
-                    result.append({'customer': name,
-                        'phone': card['phone'] if card else phone,
-                        'debt': item['balance'], 'due_date': due,
-                        'kind': item['kind'], 'obligation_id': item['id']})
-                continue
-            due = min(
-                (item['due_date'] or _business_date_after(item['date'],25) for item in unpaid),
-                key=lambda value: _business_date(value)[0],
-            )
-            phones = sorted({raw_phones[(item['kind'],item['id'])] for item in totals['obligations']})
-            result.append({'customer':name,'phone':phone,'phones':phones,
-                'total':totals['sales_revenue']+totals['opening_debt'],
-                'sales_revenue':totals['sales_revenue'],'opening_debt':totals['opening_debt'],
-                'initial_paid':totals['initial_paid'],'linked_paid':totals['linked_paid'],
-                'legacy_received':totals['legacy_received'],'legacy_applied':totals['legacy_applied'],
-                'paid':totals['received'],'excess':totals['linked_excess']+totals['legacy_excess'],
-                'debt':totals['debt'],'due_date':due})
-        return sorted(result,key=lambda r:(r['customer'].casefold(),r['phone']))
 
 @app.route('/eski-qarz', methods=['GET','POST'])
 @login_required
@@ -2902,7 +2527,15 @@ def debtors_page():
         for r in debt_customers(con, financial=financial):
             due, _ = _business_date(r['due_date'])
             days_left = (due - today).days
-            item = dict(r, days_left=days_left)
+            # Source IDs come from the same calculated financial snapshot, not
+            # from a similar-looking name or a guessed customer card.
+            group = financial['customers'][(r['customer'], r['phone'])]
+            legacy_ids = sorted({item['id'] for item in group['obligations']
+                                 if item['kind'] == 'opening' and item['balance'] > 0})
+            card_id = group['customer_id']
+            item = dict(r, days_left=days_left,
+                        edit_card_id=card_id,
+                        legacy_opening_ids=legacy_ids)
             if days_left < 0: groups['late'].append(item)
             elif days_left <= 5: groups['soon'].append(item)
             else: groups['ontime'].append(item)
@@ -2921,6 +2554,92 @@ def debtors_page():
         debt_difference=financial['totals']['debt']-debt_total,today=today.isoformat(),
         group_pagination=group_pagination,group_counts=group_counts,
         unallocated_pagination=unallocated_pagination)
+
+@app.route('/qarzdorlar/eski-qarz/<int:debt_id>/tahrirlash', methods=['GET','POST'])
+@login_required
+def debtor_legacy_edit(debt_id):
+    """Only immutable opening debt ID is edited; never amount or receipt rows."""
+    from legacy_identity_service import legacy_fingerprint, legacy_identity_edit, Conflict
+    user = current_user()
+    if user['role'] not in ('buxgalter', 'rahbar'):
+        abort(403)
+    with closing(db()) as con:
+        audit = con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='opening_debt_identity_audit'").fetchone()
+        if not audit:
+            abort(503, description='Eski qarz tahriri audit jadvali hali tasdiqlanmagan.')
+        debt = con.execute('SELECT * FROM opening_debts WHERE id=?', (debt_id,)).fetchone()
+        if debt is None:
+            abort(404)
+        if resolve_customer_identity(customer_identity_context(con), debt['customer'], debt['customer_phone']) is not None:
+            abort(409, description='Bu yozuv kartaga bog‘langan. Xaridor kartasini tahrirlang.')
+        if request.method == 'GET':
+            return render_template('debtor_identity_edit.html', edit_type='legacy', target=debt,
+                                   digest=legacy_fingerprint(con, debt_id))
+        if request.form.get('target_id') != str(debt_id):
+            abort(400)
+        try:
+            con.execute('BEGIN IMMEDIATE')
+            token, payload, previous, claim = check_remaining_operation(con, 'legacy_identity_edit')
+            state = claim.get('state', {})
+            if not isinstance(state, dict) or state.get('target_id') != debt_id:
+                raise ValueError('Tahrir tokeni boshqa yozuvga tegishli.')
+            if previous:
+                con.rollback()
+                return redirect(url_for('debtors_page'))
+            audit_id = legacy_identity_edit(con, debt_id, user['id'], state.get('digest'),
+                                            request.form.get('customer',''),
+                                            request.form.get('customer_phone',''),
+                                            confirm_existing_card=(request.form.get('confirm_existing_card') == 'yes'))
+            save_remaining_operation(con, 'legacy_identity_edit', token, payload, audit_id)
+            con.commit()
+        except (Conflict, ValueError, sqlite3.Error) as exc:
+            con.rollback()
+            abort(409, description=str(exc))
+    flash('Eski qarz ismi/telefoni tuzatildi; qarz va to‘lovlar o‘zgarmadi.', 'success')
+    return redirect(url_for('debtors_page'))
+
+
+@app.route('/qarzdorlar/xaridor/<int:customer_id>/tahrirlash', methods=['GET','POST'])
+@login_required
+def debtor_card_edit(customer_id):
+    """Edit verified customer card without rewriting legacy sales or receipt rows."""
+    from legacy_identity_service import card_fingerprint, card_identity_edit, Conflict
+    user = current_user()
+    if user['role'] not in ('buxgalter', 'rahbar'):
+        abort(403)
+    with closing(db()) as con:
+        card = con.execute('SELECT * FROM customers WHERE id=?', (customer_id,)).fetchone()
+        if card is None:
+            abort(404)
+        financial = calculate_financial_snapshot(con)
+        if not any(g['customer_id'] == customer_id and g['debt'] > 0
+                   for g in financial['customers'].values()):
+            abort(409, description='Faqat faol qarzdor kartasi tahrirlanadi.')
+        if request.method == 'GET':
+            return render_template('debtor_identity_edit.html', edit_type='card', target=card,
+                                   digest=card_fingerprint(con, customer_id))
+        if request.form.get('target_id') != str(customer_id):
+            abort(400)
+        try:
+            con.execute('BEGIN IMMEDIATE')
+            token, payload, previous, claim = check_remaining_operation(con, 'card_identity_edit')
+            state = claim.get('state', {})
+            if not isinstance(state, dict) or state.get('target_id') != customer_id:
+                raise ValueError('Tahrir tokeni boshqa kartaga tegishli.')
+            if previous:
+                con.rollback()
+                return redirect(url_for('debtors_page'))
+            audit_id = card_identity_edit(con, customer_id, user['id'], state.get('digest'),
+                                         request.form.get('customer',''),
+                                         request.form.get('customer_phone',''))
+            save_remaining_operation(con, 'card_identity_edit', token, payload, audit_id)
+            con.commit()
+        except (Conflict, ValueError, sqlite3.Error) as exc:
+            con.rollback()
+            abort(409, description=str(exc))
+    flash('Xaridor kartasi yangilandi; tarixiy to‘lovlar o‘zgarmadi.', 'success')
+    return redirect(url_for('debtors_page'))
+
 
 @app.context_processor
 def accountant_payment_context():
@@ -3063,89 +2782,14 @@ def payments_page():
 @app.route('/tolovlar/xodim-excel')
 @login_required
 def accountant_worker_payments_excel():
-    if current_user()['role'] not in ('buxgalter','rahbar'): abort(403)
-    from flask import Response
-    from io import BytesIO
-    from zipfile import ZipFile, ZIP_DEFLATED
-    from xml.sax.saxutils import escape
-    from openpyxl.utils.datetime import to_excel
-    from excel_dates import excel_date
-    with db() as con:
-        customer_context=customer_identity_context(con)
-        rows=con.execute("""SELECT a.payment_date,u.username worker_name,a.customer,a.customer_phone,a.payment_method,a.amount,au.username accountant_name,a.note FROM accountant_worker_receipts a JOIN users u ON u.id=a.worker_id JOIN users au ON au.id=a.accountant_id ORDER BY a.id DESC""").fetchall()
-    headings=['Sana','Xodim','Xaridor','Telefon','To‘lov turi','Summa (so‘m)','Qabul qilgan','Izoh']
-    values=[headings]
-    for r in rows:
-        customer,phone=customer_display(customer_context,r['customer'],r['customer_phone'])
-        values.append([r['payment_date'],r['worker_name'],customer,phone,
-            PAYMENT_METHODS.get(r['payment_method'],r['payment_method']),
-            float(r['amount']),r['accountant_name'],r['note']])
-    def col(n):
-        ret=''
-        while n:
-            n,k=divmod(n-1,26);ret=chr(65+k)+ret
-        return ret
-    rendered=[]
-    for y,line in enumerate(values,1):
-        cells=[]
-        for x,v in enumerate(line,1):
-            addr=col(x)+str(y)
-            if y > 1 and x == 1:
-                try: value = excel_date(v)
-                except ValueError as exc: abort(400, str(exc))
-                cells.append('<c r="%s" s="1">%s</c>' % (addr, '<v>%s</v>' % to_excel(value) if value is not None else ''))
-            elif isinstance(v,(float,int)):
-                cells.append('<c r="%s"><v>%s</v></c>'%(addr,str(v)))
-            else:
-                cells.append('<c r="%s" t="inlineStr"><is><t>%s</t></is></c>'%(addr,escape(str(v or ''))))
-        rendered.append('<row r="%s">%s</row>'%(y,''.join(cells)))
-    NS='http://schemas.openxmlformats.org/spreadsheetml/2006/main'
-    worksheet=('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<worksheet xmlns="'+NS+'"><sheetViews><sheetView workbookViewId="0">'
-        '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
-        '</sheetView></sheetViews><cols>'
-        '<col min="1" max="1" width="16" customWidth="1"/>'
-        '<col min="2" max="3" width="24" customWidth="1"/>'
-        '<col min="4" max="4" width="21" customWidth="1"/>'
-        '<col min="5" max="5" width="24" customWidth="1"/>'
-        '<col min="6" max="6" width="20" customWidth="1"/>'
-        '<col min="7" max="8" width="25" customWidth="1"/>'
-        '</cols><sheetData>'+''.join(rendered)+'</sheetData>'
-        '<autoFilter ref="A1:H'+str(len(values))+'"/></worksheet>')
-    b=BytesIO()
-    with ZipFile(b,'w',ZIP_DEFLATED) as z:
-        z.writestr('[Content_Types].xml','<?xml version="1.0" encoding="UTF-8"?>'
-           '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
-           '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
-           '<Default Extension="xml" ContentType="application/xml"/>'
-           '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
-           '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
-           '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
-           '</Types>')
-        z.writestr('_rels/.rels','<?xml version="1.0" encoding="UTF-8"?>'
-           '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-           '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
-           '</Relationships>')
-        z.writestr('xl/workbook.xml','<?xml version="1.0" encoding="UTF-8"?>'
-           '<workbook xmlns="'+NS+'" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-           '<sheets><sheet name="Qarz tolovlari" sheetId="1" r:id="rId1"/></sheets></workbook>')
-        z.writestr('xl/_rels/workbook.xml.rels','<?xml version="1.0" encoding="UTF-8"?>'
-           '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-           '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-           '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
-           '</Relationships>')
-        z.writestr('xl/styles.xml','<?xml version="1.0" encoding="UTF-8"?>'
-           '<styleSheet xmlns="'+NS+'"><numFmts count="1"><numFmt numFmtId="164" formatCode="dd.mm.yy"/></numFmts>'
-           '<fonts count="1"><font><name val="Calibri"/><family val="2"/><color theme="1"/><sz val="11"/><scheme val="minor"/></font></fonts>'
-           '<fills count="2"><fill><patternFill/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
-           '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
-           '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
-           '<cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
-           '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs>'
-           '<cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>')
-        z.writestr('xl/worksheets/sheet1.xml',worksheet)
-    return Response(b.getvalue(),mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                    headers={'Content-Disposition':'attachment; filename="buxgalter_xodim_qarz_tolovlari.xlsx"'})
+    return export_accountant_worker_payments_excel({
+        'PAYMENT_METHODS': PAYMENT_METHODS,
+        'abort': abort,
+        'current_user': current_user,
+        'customer_display': customer_display,
+        'customer_identity_context': customer_identity_context,
+        'db': db,
+    })
 
 @app.context_processor
 def accountant_expense_context():
@@ -3224,22 +2868,63 @@ def reports():
     with db() as con:
         sales=con.execute('SELECT product, SUM(qty_kg) qty, SUM(qty_kg*price_per_kg) amount FROM sales WHERE id NOT IN (SELECT sale_id FROM sale_cancellations) GROUP BY product').fetchall()
         expenses=con.execute('SELECT category,SUM(amount) amount FROM expenses GROUP BY category').fetchall()
+        cleaning_input = '''WITH cleaning_input AS (
+            SELECT p.id, p.date, p.wheat_kg AS cleaned_kg,
+                   CASE WHEN r.production_id IS NULL THEN COALESCE(p.raw_wheat_kg,p.wheat_kg) END AS raw_kg
+            FROM production p LEFT JOIN rop_production r ON r.production_id=p.id
+        )'''
         cleaning,cleaning_pagination=paginate_rows(con,
-            '''SELECT date, COALESCE(raw_wheat_kg,wheat_kg) raw_kg,
-                wheat_kg cleaned_kg, COALESCE(raw_wheat_kg,wheat_kg)-wheat_kg loss_kg,
-                CASE WHEN COALESCE(raw_wheat_kg,wheat_kg)>0 THEN
-                  (COALESCE(raw_wheat_kg,wheat_kg)-wheat_kg)*100.0/COALESCE(raw_wheat_kg,wheat_kg)
-                ELSE 0 END loss_pct
-                FROM production ORDER BY business_date_key(date) DESC,id DESC''',
+            cleaning_input + ''' SELECT date, raw_kg, cleaned_kg, raw_kg-cleaned_kg AS loss_kg,
+                (raw_kg-cleaned_kg)*100.0/NULLIF(raw_kg,0) AS loss_pct
+                FROM cleaning_input ORDER BY business_date_key(date) DESC,id DESC''',
             'SELECT COUNT(*) FROM production',
         )
-        totals=con.execute('''SELECT COALESCE(SUM(COALESCE(raw_wheat_kg,wheat_kg)),0),
-            COALESCE(SUM(wheat_kg),0) FROM production''').fetchone()
-    raw,cleaned=totals[0],totals[1]
+        raw, cleaned, loss = con.execute(cleaning_input + '''
+            SELECT COALESCE(SUM(raw_kg),0), COALESCE(SUM(cleaned_kg),0),
+                   COALESCE(SUM(raw_kg-cleaned_kg),0) FROM cleaning_input''').fetchone()
     return render_template('reports.html', sales=sales, expenses=expenses,
         cleaning=cleaning, raw_total=raw, cleaned_total=cleaned,
-        loss_total=raw-cleaned, loss_pct=((raw-cleaned)*100/raw if raw else 0),
+        loss_total=loss, loss_pct=(loss*100/raw if raw else 0),
         cleaning_pagination=cleaning_pagination)
+
+@app.route('/omborlar/kirim/<int:receipt_id>/tahrirlash', methods=['GET','POST'])
+@login_required
+def warehouse_daily_receipt_edit(receipt_id):
+    user=current_user()
+    if user['role']!='buxgalter':
+        abort(403)
+    con=db()
+    try:
+        row=con.execute('SELECT * FROM daily_finished_stock_receipts WHERE id=?',
+                        (receipt_id,)).fetchone()
+        if row is None:
+            abort(404)
+        if request.method=='POST':
+            try:
+                token=request.form.get('operation_token','')
+                try:
+                    payload=URLSafeSerializer(app.secret_key,salt='dc65-receipt-edit-v1').loads(token)
+                except BadSignature as exc:
+                    raise ValueError('Tahrirlash formasi eskirgan. Qayta oching.') from exc
+                if (not isinstance(payload,dict) or payload.get('action')!='edit_daily_receipt'
+                        or payload.get('user_id')!=user['id'] or payload.get('receipt_id')!=receipt_id):
+                    raise ValueError('Tahrirlash tokeni bu hisobga tegishli emas.')
+                edit_daily_receipt(con,receipt_id,request.form,user['id'],token,
+                                   payload.get('fingerprint',''))
+                flash('Kunlik kirim audit bilan yangilandi. Ombor qoldig‘i qayta hisoblandi.', 'success')
+                return redirect(url_for('warehouses'))
+            except (ValueError,KeyError,OverflowError,sqlite3.Error) as exc:
+                flash(str(exc) or 'Kirim tahririni tekshiring.', 'error')
+                return redirect(url_for('warehouse_daily_receipt_edit',receipt_id=receipt_id))
+        form_token=URLSafeSerializer(app.secret_key,salt='dc65-receipt-edit-v1').dumps({
+            'action':'edit_daily_receipt','receipt_id':receipt_id,
+            'user_id':user['id'],'fingerprint':receipt_fingerprint(row),
+            'nonce':secrets.token_urlsafe(24)})
+        return render_template('warehouse_receipt_edit.html',receipt=row,
+                               form_token=form_token,
+                               bagged=row['product'] in BAGGED_FLOUR_PRODUCTS)
+    finally:
+        con.close()
 
 @app.route('/omborlar', methods=['GET','POST'])
 @login_required
@@ -3248,7 +2933,46 @@ def warehouses():
     if request.method == 'POST':
         if user['role'] != 'buxgalter':
             abort(403)
-        if request.form.get('action') != 'opening_product_stock':
+        action = request.form.get('action')
+        if action == 'finished_stock_adjustment':
+            try:
+                token=request.form.get('operation_token','')
+                try:
+                    verified=URLSafeSerializer(app.secret_key, salt='dc65-stock-adjustment-v1').loads(token)
+                except BadSignature as exc:
+                    raise ValueError('Tuzatish formasi eskirgan. Qayta oching.') from exc
+                if (not isinstance(verified,dict) or verified.get('user_id')!=user['id']
+                        or verified.get('action')!='finished_stock_adjustment'):
+                    raise ValueError('Tuzatish tokeni ushbu buxgalterga tegishli emas.')
+                con=db()
+                try:
+                    result=record_adjustment(con,request.form,user['id'],token)
+                finally:
+                    con.close()
+                flash(f"{result['product']}: {result['qty_delta_kg']:+.2f} kg ombor tuzatishi saqlandi.", 'success')
+            except (ValueError,KeyError,OverflowError,sqlite3.Error) as exc:
+                flash(str(exc) or 'Tuzatish ma’lumotlarini tekshiring.', 'error')
+            return redirect(url_for('warehouses'))
+        if action == 'daily_finished_stock':
+            try:
+                token = request.form.get('operation_token','')
+                try:
+                    verified = URLSafeSerializer(app.secret_key, salt='daily-finished-stock-v1').loads(token)
+                except BadSignature as exc:
+                    raise ValueError('Kirim sahifasi eskirgan. Yangidan oching.') from exc
+                if (not isinstance(verified,dict) or verified.get('user_id')!=user['id']
+                        or verified.get('action')!='daily_finished_stock'):
+                    raise ValueError('Kirim tokeni buxgalterga tegishli emas.')
+                con = db()
+                try:
+                    recorded = record_daily_receipt(con, request.form, user['id'], token)
+                finally:
+                    con.close()
+                flash(f"{recorded['product']} — {recorded['qty_kg']:.2f} kg kunlik kirim saqlandi.", 'success')
+            except (ValueError, KeyError, OverflowError, sqlite3.Error) as exc:
+                flash(str(exc) or 'Kunlik kirimni tekshiring.', 'error')
+            return redirect(url_for('warehouses'))
+        if action != 'opening_product_stock':
             abort(400)
         try:
             stock_date_value = request.form.get('date', '').strip()
@@ -3307,6 +3031,14 @@ def warehouses():
                             (product,)).fetchone():
                         raise ValueError(
                             f'{product} uchun boshlang‘ich qoldiq avval kiritilgan.')
+                # Prevent opening snapshot from swallowing or duplicating newer daily postings.
+                if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='daily_finished_stock_receipts'").fetchone():
+                    if con.execute('SELECT 1 FROM daily_finished_stock_receipts WHERE product=? LIMIT 1',
+                        (product,)).fetchone():
+                        raise ValueError('Bu mahsulot uchun kunlik kirim mavjud. Endi boshlang‘ich qoldiq kiritib bo‘lmaydi.')
+                if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='finished_stock_adjustments'").fetchone():
+                    if con.execute('SELECT 1 FROM finished_stock_adjustments WHERE product=? LIMIT 1',(product,)).fetchone():
+                        raise ValueError('Bu mahsulot uchun ombor korrektirovkasi mavjud. Boshlang‘ich qoldiq endi kiritilmaydi.')
                 if product_stock_activity_exists(con, product, stock_day):
                     raise ValueError(
                         f'{product} bo‘yicha tanlangan sana yoki undan keyin tarixiy ishlab '
@@ -3338,13 +3070,39 @@ def warehouses():
         stocks=product_stocks(con)
         bagged_stocks=bagged_product_stocks(con)
         purchased=con.execute('SELECT COALESCE(SUM(net),0) FROM wheat_receipts').fetchone()[0]
-        consumed=con.execute('SELECT COALESCE(SUM(COALESCE(raw_wheat_kg,wheat_kg)),0) FROM production').fetchone()[0]
+        consumed=rop.wheat_warehouse_used(con)
+        period = rop.latest_period(con)
+        rop_measurement = rop.latest_measurement(con, period)
+        rop_totals = rop.period_totals(con, period) if period and not period['stop_day'] else None
         kg_openings=con.execute("""SELECT s.*,u.username AS entered_by_name
             FROM opening_product_stocks s JOIN users u ON u.id=s.entered_by
             ORDER BY business_date_key(s.stock_date),s.product""").fetchall()
         bag_openings=con.execute("""SELECT s.*,u.username AS entered_by_name
             FROM opening_bagged_product_stocks s JOIN users u ON u.id=s.entered_by
             ORDER BY business_date_key(s.stock_date),s.product""").fetchall()
+        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='daily_finished_stock_receipts'").fetchone():
+            daily_entries, daily_pagination = paginate_rows(
+                con,
+                """SELECT r.id,r.receipt_date,r.product,r.qty_kg,r.bag_25_count,r.bag_50_count,
+                    r.note,r.created_at,u.username AS entered_by_name
+                    FROM daily_finished_stock_receipts r JOIN users u ON u.id=r.entered_by
+                    ORDER BY business_date_key(r.receipt_date) DESC,r.id DESC""",
+                'SELECT COUNT(*) FROM daily_finished_stock_receipts',
+                page_param='daily_page',per_page_param='daily_per_page')
+        else:
+            daily_entries, daily_pagination = [], _pagination_state(0,'daily_page','daily_per_page')
+        if con.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='finished_stock_adjustments'").fetchone():
+            adjustments, adjustments_pagination = paginate_rows(
+                con,
+                """SELECT a.id,a.adjustment_date,a.product,a.qty_delta_kg,
+                    a.bag_25_delta,a.bag_50_delta,a.reason,a.created_at,
+                    u.username AS entered_by_name
+                    FROM finished_stock_adjustments a JOIN users u ON u.id=a.entered_by
+                    ORDER BY business_date_key(a.adjustment_date) DESC,a.id DESC""",
+                'SELECT COUNT(*) FROM finished_stock_adjustments',
+                page_param='adj_page',per_page_param='adj_per_page')
+        else:
+            adjustments, adjustments_pagination = [], _pagination_state(0,'adj_page','adj_per_page')
     finally:
         con.close()
     existing_kg_products = {row['product'] for row in kg_openings}
@@ -3369,1681 +3127,62 @@ def warehouses():
     )
     return render_template('warehouses.html', stocks=stocks,
                            bagged_stocks=bagged_stocks, wheat_stock=purchased-consumed,
+                           rop_measurement=rop_measurement, rop_totals=rop_totals,
                            opening_products=opening_products,
                            opening_bagged_products=BAGGED_FLOUR_PRODUCTS,
                            stock_openings=stock_openings,
-                           today=date.today().isoformat())
+                           today=date.today().isoformat(),
+                           products=PRODUCTS, daily_entries=daily_entries,
+                           daily_pagination=daily_pagination,
+                           stock_adjustments=adjustments,
+                           adjustments_pagination=adjustments_pagination,
+                           adjustment_token=URLSafeSerializer(app.secret_key, salt='dc65-stock-adjustment-v1').dumps({
+                               'action':'finished_stock_adjustment','user_id':user['id'],
+                               'nonce':secrets.token_urlsafe(24)}) if user['role']=='buxgalter' else '',
+                           daily_token=URLSafeSerializer(app.secret_key, salt='daily-finished-stock-v1').dumps({
+                               'action':'daily_finished_stock','user_id':user['id'],
+                               'nonce':secrets.token_urlsafe(24)}) if user['role']=='buxgalter' else '')
 
 @app.route('/hisobot/yagona-excel')
 @login_required
 def unified_excel_report():
-    from io import BytesIO
-    from datetime import datetime
-    from flask import send_file
-    from openpyxl import Workbook
-    from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
-    from openpyxl.utils import get_column_letter
-    from date_sql import mixed_date_to_iso
-
-    start = request.args.get('start', '').strip()
-    end = request.args.get('end', '').strip()
-    try:
-        start = mixed_date_to_iso(start) if start else ''
-        end = mixed_date_to_iso(end) if end else ''
-        if start and end and start > end:
-            raise ValueError()
-    except ValueError:
-        abort(400, 'Sana oralig‘i noto‘g‘ri; YYYY-MM-DD yoki DD-MM-YYYY formatidan foydalaning.')
-
-    def date_key(value):
-        return mixed_date_to_iso(value)
-
-    cutoff = end or date.today().isoformat()
-
-    def in_period(value):
-        key = date_key(value)
-        return (not start or key >= start) and key <= cutoff
-
-    def date_value(value):
-        return datetime.strptime(date_key(value), '%Y-%m-%d') if value else None
-
-    def period_text():
-        if not start and not end:
-            return 'Barcha sanalar'
-        return f'{date_value(start).strftime("%d.%m.%Y") if start else "Boshlanishi"} — {date_value(end).strftime("%d.%m.%Y") if end else "Bugungi holat"}'
-
-    zero = Decimal('0')
-    balance_epsilon = Decimal('0.000001')
-
-    def amount(value):
-        return Decimal(str(value or 0))
-
-    def report_balance(value):
-        return zero if abs(value) <= balance_epsilon else value
-
-    def payment_method(value):
-        return {'naqd': 'Naqd', 'plastik': 'Plastik', 'hisob': 'Bank'}.get(
-            value, value or 'Aniqlanmagan')
-
-    def status_for(balance, paid):
-        balance = report_balance(balance)
-        if balance <= zero:
-            return 'To‘langan'
-        return 'Qisman to‘langan' if paid > zero else 'Qarzdor'
-
-    try:
-        con = db()
-        try:
-            con.execute('BEGIN')
-            customer_context = customer_identity_context(con)
-            users = {
-                row['id']: ROLES.get(row['role'], row['username'])
-                for row in con.execute('SELECT id,username,role FROM users')
-            }
-            all_sales = [dict(row) for row in con.execute("""
-                SELECT s.*, i.number AS invoice_number
-                FROM sales s LEFT JOIN invoices i ON i.sale_id=s.id
-                ORDER BY business_date_key(s.date),s.id
-            """)]
-            cancellation_rows = [dict(row) for row in con.execute(
-                'SELECT sale_id,cancelled_at FROM sale_cancellations')]
-            cancelled_at_cutoff = {
-                row['sale_id'] for row in cancellation_rows
-                if not row['cancelled_at']
-                or date_key(str(row['cancelled_at'])[:10]) <= cutoff
-            }
-            active_period_sales = [
-                row for row in all_sales
-                if row['id'] not in cancelled_at_cutoff and in_period(row['date'])
-            ]
-            period_sales = [row for row in all_sales if in_period(row['date'])]
-            receipts = [dict(row) for row in con.execute(
-                'SELECT * FROM worker_receipts ORDER BY id')]
-            legacy_payments = [dict(row) for row in con.execute(
-                'SELECT * FROM payments ORDER BY id')]
-            direct_receipts = {
-                row['receipt_id']: dict(row)
-                for row in con.execute('SELECT * FROM accountant_worker_receipts')
-            }
-            batch_by_sale = {
-                row['sale_id']: row['batch_id']
-                for row in con.execute('SELECT sale_id,batch_id FROM worker_sale_batch_items')
-            }
-            batch_channels = {}
-            for row in con.execute(
-                    'SELECT batch_id,payment_method,amount FROM worker_sale_batch_payments ORDER BY id'):
-                batch_channels.setdefault(row['batch_id'], []).append(
-                    f"{payment_method(row['payment_method'])}: {amount(row['amount']):,.0f}")
-
-            def financial_as_of(connection, cutoff_date):
-                snapshot = sqlite3.connect(':memory:')
-                snapshot.row_factory = sqlite3.Row
-                try:
-                    connection.backup(snapshot)
-                    as_of_tables = (
-                        ('sales', 'date'),
-                        ('opening_debts', 'date'),
-                        ('opening_debt_receipts', 'date'),
-                        ('worker_receipts', 'date'),
-                        ('accountant_worker_receipts', 'payment_date'),
-                        ('payments', 'date'),
-                    )
-                    for table, date_column in as_of_tables:
-                        expired = [
-                            row['id'] for row in snapshot.execute(
-                                f'SELECT id,{date_column} FROM {table}')
-                            if date_key(row[date_column]) > cutoff_date
-                        ]
-                        snapshot.executemany(
-                            f'DELETE FROM {table} WHERE id=?',
-                            ((row_id,) for row_id in expired))
-                    expired_cancellations = []
-                    for row in snapshot.execute(
-                            'SELECT sale_id,cancelled_at FROM sale_cancellations'):
-                        cancellation_date = str(row['cancelled_at'] or '')[:10]
-                        if cancellation_date and date_key(cancellation_date) > cutoff_date:
-                            expired_cancellations.append((row['sale_id'],))
-                    snapshot.executemany(
-                        'DELETE FROM sale_cancellations WHERE sale_id=?',
-                        expired_cancellations)
-                    return calculate_financial_snapshot(snapshot)
-                finally:
-                    snapshot.close()
-
-            historical = financial_as_of(con, cutoff)
-            sales_debt_balance = sum(
-                (report_balance(obligation['balance'])
-                 for group in historical['customers'].values()
-                 for obligation in group['obligations']
-                 if obligation['kind'] == 'sale'),
-                zero,
-            )
-            opening_debt_balance = sum(
-                (report_balance(obligation['balance'])
-                 for group in historical['customers'].values()
-                 for obligation in group['obligations']
-                 if obligation['kind'] == 'opening'),
-                zero,
-            )
-            prior_period_debt = sum(
-                (report_balance(obligation['balance'])
-                 for group in historical['customers'].values()
-                 for obligation in group['obligations']
-                 if start and date_key(obligation['date']) < start),
-                zero,
-            )
-            allocation = {
-                item['id']: item
-                for group in historical['customers'].values()
-                for item in group['obligations']
-                if item['kind'] == 'sale'
-            }
-            unallocated_legacy_ids = {
-                row['id'] for row in historical['unallocated_legacy']
-            }
-            def display_customer(name, phone):
-                return customer_display(customer_context, name or '', phone or '')
-
-            def invoice_label(row):
-                sale_id = f"S-{row['id']}"
-                return (
-                    f"{sale_id} / № {row['invoice_number']}"
-                    if row.get('invoice_number') else sale_id
-                )
-
-            # Payment rows intentionally use source events; accountant records classify
-            # linked receipts and are never added as an additional receipt.
-            events = []
-            sales_by_id = {row['id']: row for row in all_sales}
-            for sale in all_sales:
-                paid = amount(sale['paid'])
-                if paid <= zero or not in_period(sale['date']):
-                    continue
-                recipient_id = sale.get('initial_payment_recipient_id') or sale.get('user_id')
-                note = sale.get('note') or ''
-                batch_id = batch_by_sale.get(sale['id'])
-                method = payment_method(sale.get('payment_method'))
-                if batch_id is not None:
-                    method = 'Aniqlanmagan'
-                    batch_note = (
-                        f" | Paket {batch_id}: avans sotuvlar orasida taqsimlangan; "
-                        f"kanallar qayta qo‘shilmaydi ({'; '.join(batch_channels.get(batch_id, []))})."
-                    )
-                    note = (note + batch_note).strip()
-                if sale['id'] in cancelled_at_cutoff:
-                    note = (note + ' | Bekor qilingan sotuvdagi to‘lov; qaytarilgan deb hisoblanmadi.').strip()
-                events.append({
-                    'date': sale['date'], 'id': f"S-{sale['id']}-AVANS",
-                    'customer': display_customer(sale['customer'], sale['customer_phone'])[0],
-                    'sale_id': sale['id'], 'amount': paid,
-                    'method': method,
-                    'recipient': users.get(recipient_id, 'Aniqlanmagan'),
-                    'owner': users.get(sale.get('user_id'), 'Aniqlanmagan'),
-                    'note': note, 'kind': 'initial',
-                })
-            for row in legacy_payments:
-                if not in_period(row['date']):
-                    continue
-                card = resolve_customer_name(customer_context, row['customer'])
-                customer_name = card['name'] if card else row['customer']
-                note = row.get('note') or ''
-                if row['id'] in unallocated_legacy_ids:
-                    note = (
-                        note + ' | Eski to‘lov ishonchli majburiyat/xodimga '
-                        'bog‘lanmagani uchun qarzdan chegirilmadi.'
-                    ).strip()
-                events.append({
-                    'date': row['date'], 'id': f"P-{row['id']}",
-                    'customer': customer_name, 'sale_id': '',
-                    'amount': amount(row['amount']),
-                    'method': 'Aniqlanmagan', 'recipient': 'Aniqlanmagan',
-                    'owner': 'Aniqlanmagan', 'note': note,
-                    'kind': 'legacy',
-                })
-            for receipt in receipts:
-                if not in_period(receipt['date']):
-                    continue
-                sale = sales_by_id.get(receipt['sale_id'])
-                direct = direct_receipts.get(receipt['id'])
-                recipient_id = direct['accountant_id'] if direct else receipt['worker_id']
-                note = direct.get('note', '') if direct else ''
-                if not sale or receipt['sale_id'] in cancelled_at_cutoff:
-                    note = (note + ' | Faol sotuvga bog‘lanmagan to‘lov.').strip()
-                if direct and (
-                        direct['amount'] != receipt['amount']
-                        or direct['worker_id'] != receipt['worker_id']
-                        or direct['payment_method'] != receipt.get('payment_method')):
-                    note = (note + ' | Buxgalter belgilashi asosiy to‘lovga mos emas.').strip()
-                name, phone = display_customer(
-                    sale.get('customer', '') if sale else '',
-                    sale.get('customer_phone', '') if sale else '')
-                events.append({
-                    'date': receipt['date'], 'id': f"T-{receipt['id']}",
-                    'customer': name, 'sale_id': receipt['sale_id'],
-                    'amount': amount(receipt['amount']),
-                    'method': payment_method(receipt.get('payment_method')),
-                    'recipient': users.get(recipient_id, 'Aniqlanmagan'),
-                    'owner': users.get(sale.get('user_id'), 'Aniqlanmagan') if sale else 'Aniqlanmagan',
-                    'note': note, 'kind': 'linked',
-                })
-            events.sort(key=lambda row: (date_key(row['date']), row['kind'], row['id']))
-            period_paid = sum((row['amount'] for row in events), zero)
-            period_sales_total = sum(
-                (amount(row['qty_kg']) * amount(row['price_per_kg'])
-                 for row in active_period_sales), zero)
-
-            debt_rows = []
-            debt_by_customer_id = {}
-            for group in historical['customers'].values():
-                if group['debt'] <= zero:
-                    continue
-                customer_id = group.get('customer_id')
-                card = customer_context['cards'].get(customer_id)
-                obligation_ids = []
-                workers = set()
-                for obligation in group['obligations']:
-                    if obligation['balance'] <= zero:
-                        continue
-                    if obligation['kind'] == 'sale':
-                        obligation_ids.append(f"S-{obligation['id']}")
-                        sale = sales_by_id.get(obligation['id'])
-                        if sale and sale.get('user_id') is not None:
-                            workers.add(users.get(sale['user_id'], 'Aniqlanmagan'))
-                    else:
-                        obligation_ids.append(f"Q-{obligation['id']}")
-                if len(workers) == 1:
-                    owner = next(iter(workers))
-                elif workers:
-                    owner = 'Aralash: ' + ', '.join(sorted(workers))
-                else:
-                    owner = 'Aniqlanmagan'
-                last_dates = []
-                sale_obligation_ids = {
-                    item['id'] for item in group['obligations']
-                    if item['kind'] == 'sale'
-                }
-                for sale_id in sale_obligation_ids:
-                    sale = sales_by_id.get(sale_id)
-                    if sale and amount(sale['paid']) > zero:
-                        last_dates.append(sale['date'])
-                for receipt in historical['receipts']:
-                    if receipt['sale_id'] in sale_obligation_ids:
-                        last_dates.append(receipt['date'])
-                legacy_ids = set(group.get('legacy_payment_ids', []))
-                last_dates.extend(
-                    row['date'] for row in legacy_payments
-                    if row['id'] in legacy_ids)
-                last_payment = max(last_dates, key=date_key) if last_dates else ''
-                customer_name = card['name'] if card else group['customer']
-                customer_phone = card['phone'] if card else group['phone']
-                debt_rows.append({
-                    'customer_id': customer_id,
-                    'name': customer_name, 'phone': customer_phone,
-                    'owner': owner, 'total': group['sales_revenue'] + group['opening_debt'],
-                    'paid': group['received'], 'debt': group['debt'],
-                    'prior_debt': sum(
-                        (report_balance(item['balance']) for item in group['obligations']
-                         if (start and date_key(item['date']) < start)
-                         or (not start and item['kind'] == 'opening')),
-                        zero,
-                    ),
-                    'last_payment': last_payment,
-                    'status': status_for(group['debt'], group['received']),
-                    'ids': ', '.join(obligation_ids),
-                })
-                if customer_id is not None:
-                    prior = debt_by_customer_id.get(customer_id, zero)
-                    debt_by_customer_id[customer_id] = prior + group['debt']
-            debt_rows.sort(key=lambda row: (row['name'].casefold(), row['phone']))
-
-            cards = [dict(row) for row in con.execute(
-                'SELECT id,name,phone FROM customers ORDER BY name,id')]
-            period_sales_by_customer = {}
-            period_paid_by_customer = {}
-            last_sale_by_customer = {}
-            for sale in all_sales:
-                if sale['id'] in cancelled_at_cutoff:
-                    continue
-                key = date_key(sale['date'])
-                card = resolve_customer_identity(
-                    customer_context, sale['customer'], sale['customer_phone'])
-                if not card:
-                    continue
-                if key <= cutoff:
-                    previous = last_sale_by_customer.get(card['id'])
-                    if previous is None or key > previous[0]:
-                        last_sale_by_customer[card['id']] = (key, sale['date'])
-                if in_period(sale['date']):
-                    period_sales_by_customer[card['id']] = (
-                        period_sales_by_customer.get(card['id'], zero)
-                        + amount(sale['qty_kg']) * amount(sale['price_per_kg']))
-            for event in events:
-                customer_id = None
-                if event['kind'] == 'initial':
-                    sale = sales_by_id.get(event['sale_id'])
-                    if sale:
-                        card = resolve_customer_identity(
-                            customer_context, sale['customer'], sale['customer_phone'])
-                        customer_id = card['id'] if card else None
-                elif event['kind'] == 'linked':
-                    sale = sales_by_id.get(event['sale_id'])
-                    if sale:
-                        card = resolve_customer_identity(
-                            customer_context, sale['customer'], sale['customer_phone'])
-                        customer_id = card['id'] if card else None
-                elif event['kind'] == 'legacy':
-                    card = resolve_customer_name(customer_context, event['customer'])
-                    customer_id = card['id'] if card else None
-                if customer_id is not None:
-                    period_paid_by_customer[customer_id] = (
-                        period_paid_by_customer.get(customer_id, zero) + event['amount'])
-
-            customer_rows = []
-            for card in cards:
-                customer_id = card['id']
-                sales_total = period_sales_by_customer.get(customer_id, zero)
-                paid_total = period_paid_by_customer.get(customer_id, zero)
-                debt = debt_by_customer_id.get(customer_id, zero)
-                if not (sales_total or paid_total or debt):
-                    continue
-                historical_group = next(
-                    (group for group in historical['customers'].values()
-                     if group.get('customer_id') == customer_id), None)
-                cumulative_paid = historical_group['received'] if historical_group else paid_total
-                customer_rows.append({
-                    'id': customer_id, 'name': card['name'], 'phone': card['phone'],
-                    'sales': sales_total, 'paid': paid_total, 'debt': debt,
-                    'last_sale': last_sale_by_customer.get(customer_id, (None, ''))[1],
-                    'status': status_for(debt, cumulative_paid),
-                })
-            customer_rows.sort(key=lambda row: (row['name'].casefold(), row['id']))
-
-            wb = Workbook()
-            summary = wb.active
-            summary.title = 'JAMLANMA'
-            sales_ws = wb.create_sheet('SOTUVLAR')
-            debt_ws = wb.create_sheet('QARZLAR')
-            payments_ws = wb.create_sheet('TO‘LOVLAR')
-            customers_ws = wb.create_sheet('MIJOZLAR')
-            wb.properties.title = 'TO‘RTKO‘LDONMAHSULOTI yagona moliyaviy hisoboti'
-            wb.properties.subject = f'Yagona hisobot: {period_text()}'
-
-            dark_green = '075B3B'
-            mid_green = '128451'
-            pale_green = 'EAF5EE'
-            white = 'FFFFFF'
-            light_border = Side(style='thin', color='D8E5DC')
-            money_format = '#,##0.## "so‘m"'
-            number_format = '#,##0.##'
-            date_format = 'dd.mm.yyyy'
-
-            def paint_table(ws, title, headers, rows, widths, status_index=None,
-                            total_values=None, header_row=4, title_row=1,
-                            subtitle_row=2, period_note=None, money_columns=()):
-                last_column = len(headers)
-                ws.merge_cells(start_row=title_row, start_column=1,
-                               end_row=title_row, end_column=last_column)
-                title_cell = ws.cell(title_row, 1, title)
-                title_cell.fill = PatternFill('solid', fgColor=dark_green)
-                title_cell.font = Font(name='Aptos Display', size=16, bold=True, color=white)
-                title_cell.alignment = Alignment(vertical='center')
-                ws.row_dimensions[title_row].height = 30
-                ws.merge_cells(start_row=subtitle_row, start_column=1,
-                               end_row=subtitle_row, end_column=last_column)
-                subtitle = period_note or (
-                    f"Hisobot davri: {period_text()}. Sotuv/to‘lov aylanmasi davr bo‘yicha; "
-                    "qarz qoldig‘i tanlangan davr oxirida, oldingi qarzlar bilan."
-                )
-                subtitle_cell = ws.cell(subtitle_row, 1, subtitle)
-                subtitle_cell.font = Font(size=10, italic=True, color='45564B')
-                subtitle_cell.alignment = Alignment(wrap_text=True, vertical='center')
-                ws.row_dimensions[subtitle_row].height = 30
-                for column, heading in enumerate(headers, 1):
-                    cell = ws.cell(header_row, column, heading)
-                    cell.fill = PatternFill('solid', fgColor=dark_green)
-                    cell.font = Font(bold=True, color=white)
-                    cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                    cell.border = Border(bottom=Side(style='medium', color=mid_green))
-                ws.row_dimensions[header_row].height = 32
-                for row_index, values in enumerate(rows, header_row + 1):
-                    for column, value in enumerate(values, 1):
-                        cell = ws.cell(row_index, column, value)
-                        cell.fill = PatternFill(
-                            'solid', fgColor=white if (row_index - header_row) % 2 else pale_green)
-                        cell.alignment = Alignment(vertical='top', wrap_text=True)
-                        cell.border = Border(bottom=light_border)
-                        if isinstance(value, str):
-                            cell.data_type = 's'
-                        elif isinstance(value, datetime):
-                            cell.number_format = date_format
-                        elif isinstance(value, Decimal):
-                            cell.number_format = (
-                                money_format if column in money_columns else number_format)
-                            cell.alignment = Alignment(horizontal='right', vertical='top')
-                        elif isinstance(value, (int, float)) and not isinstance(value, bool):
-                            cell.number_format = number_format
-                            cell.alignment = Alignment(horizontal='right', vertical='top')
-                    if status_index is not None:
-                        status_cell = ws.cell(row_index, status_index)
-                        color = {
-                            'To‘langan': 'D9EFD9',
-                            'Qisman to‘langan': 'FFF0C2',
-                            'Qarzdor': 'FCE0E0',
-                            'Bekor qilingan': 'E8E8E8',
-                        }.get(status_cell.value)
-                        if color:
-                            status_cell.fill = PatternFill('solid', fgColor=color)
-                            status_cell.font = Font(bold=True)
-                last_data_row = header_row + len(rows)
-                if total_values is not None:
-                    total_row = last_data_row + 1
-                    for column, value in enumerate(total_values, 1):
-                        cell = ws.cell(total_row, column, value)
-                        cell.fill = PatternFill('solid', fgColor='DCEFE2')
-                        cell.font = Font(bold=True, color='163D2B')
-                        cell.border = Border(top=Side(style='medium', color=mid_green))
-                        if isinstance(value, Decimal):
-                            cell.number_format = (
-                                money_format if column in money_columns else number_format)
-                            cell.alignment = Alignment(horizontal='right')
-                    last_data_row = total_row
-                ws.auto_filter.ref = (
-                    f'A{header_row}:{get_column_letter(last_column)}'
-                    f'{max(header_row, header_row + len(rows))}'
-                )
-                ws.freeze_panes = f'A{header_row + 1}'
-                ws.sheet_view.showGridLines = False
-                ws.page_setup.orientation = 'landscape'
-                ws.page_setup.paperSize = ws.PAPERSIZE_A4
-                ws.page_setup.fitToWidth = 1
-                ws.page_setup.fitToHeight = 0
-                ws.sheet_properties.pageSetUpPr.fitToPage = True
-                ws.print_title_rows = f'{header_row}:{header_row}'
-                ws.print_area = f'A1:{get_column_letter(last_column)}{last_data_row}'
-                for column, width in enumerate(widths, 1):
-                    ws.column_dimensions[get_column_letter(column)].width = width
-                return last_data_row
-
-            summary_headers = [
-                'Sana', 'Hujjat №', 'Xaridor', 'Telefon', 'Mahsulot',
-                'Sotuv summasi', 'To‘langan summa', 'Qolgan qarz', 'Holat',
-            ]
-            summary_rows = []
-            for sale in active_period_sales:
-                item = allocation.get(sale['id'])
-                if not item:
-                    continue
-                name, phone = display_customer(sale['customer'], sale['customer_phone'])
-                paid_to_date = item['initial_paid'] + item['linked_paid'] + item['legacy_applied']
-                summary_rows.append([
-                    date_value(sale['date']), invoice_label(sale), name, phone,
-                    sale['product'], item['amount'], paid_to_date,
-                    report_balance(item['balance']),
-                    status_for(item['balance'], paid_to_date),
-                ])
-
-            summary.merge_cells('C1:I1')
-            summary.merge_cells('C2:I2')
-            summary.merge_cells('C3:I3')
-            summary['C1'] = 'TO‘RTKO‘LDONMAHSULOTI MCHJ'
-            summary['C1'].font = Font(name='Aptos Display', size=20, bold=True, color=dark_green)
-            summary['C2'] = 'Yagona hisobot (Sotuvlar • Qarzlar • To‘lovlar)'
-            summary['C2'].font = Font(size=13, bold=True, color='233C30')
-            summary['C3'] = f'Hisobot davri: {period_text()}'
-            summary['C3'].font = Font(size=10, italic=True, color='526458')
-            for cell in ('C1', 'C2', 'C3'):
-                summary[cell].alignment = Alignment(vertical='center')
-            summary.row_dimensions[1].height = 34
-            summary.row_dimensions[2].height = 26
-            summary.row_dimensions[3].height = 22
-            logo_path = Path(BASE_DIR) / 'static' / 'company_logo.png'
-            if not logo_path.is_file():
-                abort(500, 'Korxona logotipi topilmadi; yagona hisobot yaratilmadi.')
-            cards = [
-                ('📈 JAMI SOTUV', period_sales_total, 'DDF1E3', '17643C'),
-                ('💳 JAMI TO‘LOV', period_paid, 'E8F5EA', '2A7B4B'),
-                ('⚠ JAMI QARZ (DAVR OXIRI)', historical['totals']['debt'], 'FCE6E6', 'B62828'),
-                ('👥 QARZDORLAR SONI', Decimal(len(debt_rows)), 'E4F1FA', '17608A'),
-            ]
-            card_ranges = [('A4:B4', 'A5:B5'), ('C4:D4', 'C5:D5'),
-                           ('E4:F4', 'E5:F5'), ('G4:I4', 'G5:I5')]
-            for (label, value, fill, color), (label_range, value_range) in zip(cards, card_ranges):
-                summary.merge_cells(label_range)
-                summary.merge_cells(value_range)
-                label_cell = summary[label_range.split(':')[0]]
-                value_cell = summary[value_range.split(':')[0]]
-                label_cell.value = label
-                value_cell.value = value
-                for ref in (label_range, value_range):
-                    for row in summary[ref]:
-                        for cell in row:
-                            cell.fill = PatternFill('solid', fgColor=fill)
-                            cell.border = Border(
-                                left=light_border, right=light_border,
-                                top=light_border, bottom=light_border)
-                label_cell.font = Font(size=11, bold=True, color=color)
-                value_cell.font = Font(size=18, bold=True, color=color)
-                value_cell.number_format = '0 "ta"' if 'QARZDORLAR SONI' in label else money_format
-                label_cell.alignment = Alignment(horizontal='center', vertical='center')
-                value_cell.alignment = Alignment(horizontal='center', vertical='center')
-            summary.row_dimensions[4].height = 30
-            summary.row_dimensions[5].height = 44
-            summary.merge_cells('A6:I6')
-            debt_note = summary['A6']
-            debt_note.value = (
-                f"Qarz tarkibi — sotuvlar qoldig‘i: {sales_debt_balance:,.0f} so‘m; "
-                f"boshlang‘ich qarzlar qoldig‘i: {opening_debt_balance:,.0f} so‘m; "
-                f"umumiy qarz: {historical['totals']['debt']:,.0f} so‘m."
-            )
-            if start:
-                debt_note.value += (
-                    f" Davr boshlanishigacha bo‘lgan qoldiq: "
-                    f"{prior_period_debt:,.0f} so‘m."
-                )
-            debt_note.font = Font(size=10, italic=True, color='45564B')
-            debt_note.fill = PatternFill('solid', fgColor='F1F6F2')
-            debt_note.alignment = Alignment(vertical='center', wrap_text=True)
-            summary.row_dimensions[6].height = 30
-            summary_headers_row = 7
-            for column, heading in enumerate(summary_headers, 1):
-                cell = summary.cell(summary_headers_row, column, heading)
-                cell.fill = PatternFill('solid', fgColor=dark_green)
-                cell.font = Font(bold=True, color=white)
-                cell.alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
-                cell.border = Border(bottom=Side(style='medium', color=mid_green))
-            summary.row_dimensions[summary_headers_row].height = 32
-            for row_index, values in enumerate(summary_rows, summary_headers_row + 1):
-                for column, value in enumerate(values, 1):
-                    cell = summary.cell(row_index, column, value)
-                    cell.fill = PatternFill(
-                        'solid', fgColor=white if (row_index - summary_headers_row) % 2 else pale_green)
-                    cell.alignment = Alignment(vertical='top', wrap_text=True)
-                    cell.border = Border(bottom=light_border)
-                    if isinstance(value, str):
-                        cell.data_type = 's'
-                    elif isinstance(value, datetime):
-                        cell.number_format = date_format
-                    elif isinstance(value, Decimal):
-                        cell.number_format = (
-                            money_format if column in (6, 7, 8) else number_format)
-                        cell.alignment = Alignment(horizontal='right')
-                status_cell = summary.cell(row_index, 9)
-                status_cell.fill = PatternFill('solid', fgColor={
-                    'To‘langan': 'D9EFD9', 'Qisman to‘langan': 'FFF0C2',
-                    'Qarzdor': 'FCE0E0',
-                }[status_cell.value])
-                status_cell.font = Font(bold=True)
-            summary_total_row = summary_headers_row + len(summary_rows) + 1
-            summary_totals = [
-                'JAMI', '', '', '', '',
-                sum((row[5] for row in summary_rows), zero),
-                sum((row[6] for row in summary_rows), zero),
-                sum((row[7] for row in summary_rows), zero), '',
-            ]
-            for column, value in enumerate(summary_totals, 1):
-                cell = summary.cell(summary_total_row, column, value)
-                cell.fill = PatternFill('solid', fgColor='DCEFE2')
-                cell.font = Font(bold=True, color='163D2B')
-                cell.border = Border(top=Side(style='medium', color=mid_green))
-                if isinstance(value, Decimal):
-                    cell.number_format = (
-                        money_format if column in (6, 7, 8) else number_format)
-                    cell.alignment = Alignment(horizontal='right')
-            summary.auto_filter.ref = (
-                f'A7:I{max(7, 7 + len(summary_rows))}')
-            summary.freeze_panes = 'A8'
-            summary.sheet_view.showGridLines = False
-            summary.page_setup.orientation = 'landscape'
-            summary.page_setup.paperSize = summary.PAPERSIZE_A4
-            summary.page_setup.fitToWidth = 1
-            summary.page_setup.fitToHeight = 0
-            summary.sheet_properties.pageSetUpPr.fitToPage = True
-            summary.print_title_rows = '7:7'
-            summary.print_area = f'A1:I{summary_total_row}'
-            for column, width in enumerate((16, 23, 32, 22, 28, 21, 21, 21, 22), 1):
-                summary.column_dimensions[get_column_letter(column)].width = width
-
-            sales_headers = [
-                'Sana', 'Sotuv ID / hujjat №', 'Xaridor nomi', 'Telefon',
-                'Mahsulot', 'Qop og‘irligi (kg)', 'Qop soni', 'Jami kg',
-                'Birlik narxi', 'Sotuv summasi', 'Sotuv xodimi',
-                'Sotuv vaqtidagi to‘lov', 'Keyingi to‘lovlar (davr oxirigacha)',
-                'Eski to‘lovlardan FIFO', 'Qolgan qarz', 'Holat',
-            ]
-            sales_data = []
-            active_sales_amount = active_sales_initial = active_sales_linked = zero
-            active_sales_legacy = active_sales_debt = zero
-            historical_receipts = {
-                row['id']: row for row in historical['receipts']
-            }
-            for sale in period_sales:
-                item = allocation.get(sale['id'])
-                initial = amount(sale['paid'])
-                if sale['id'] in cancelled_at_cutoff:
-                    linked = sum(
-                        (row['amount'] for row in historical_receipts.values()
-                         if row['sale_id'] == sale['id']), zero)
-                    legacy_applied = zero
-                    balance = zero
-                    label = 'Bekor qilingan'
-                    sale_amount = amount(sale['qty_kg']) * amount(sale['price_per_kg'])
-                else:
-                    if not item:
-                        continue
-                    linked = item['linked_paid']
-                    legacy_applied = item['legacy_applied']
-                    balance = report_balance(item['balance'])
-                    label = status_for(balance, initial + linked + legacy_applied)
-                    sale_amount = item['amount']
-                    active_sales_amount += sale_amount
-                    active_sales_initial += initial
-                    active_sales_linked += linked
-                    active_sales_legacy += legacy_applied
-                    active_sales_debt += balance
-                name, phone = display_customer(sale['customer'], sale['customer_phone'])
-                sales_data.append([
-                    date_value(sale['date']), invoice_label(sale), name, phone,
-                    sale['product'], sale.get('bag_kg'), sale.get('bag_count'),
-                    amount(sale['qty_kg']), amount(sale.get('unit_price') or sale['price_per_kg']),
-                    sale_amount, users.get(sale.get('user_id'), 'Aniqlanmagan'),
-                    initial, linked, legacy_applied, balance, label,
-                ])
-            sales_total = [
-                'JAMI', '', '', '', '', '', '', None, None,
-                active_sales_amount, '', active_sales_initial, active_sales_linked,
-                active_sales_legacy, active_sales_debt, '',
-            ]
-            paint_table(
-                sales_ws, 'SOTUVLAR — sotuvlar va ularning to‘lov holati',
-                sales_headers, sales_data,
-                [13, 19, 25, 18, 23, 16, 12, 14, 17, 18, 18, 19, 23, 20, 18, 20],
-                status_index=16, total_values=sales_total,
-                money_columns=(9, 10, 12, 13, 14, 15),
-            )
-
-            debt_headers = [
-                'Xaridor nomi', 'Telefon', 'Mas’ul xodim',
-                'Sotuvlar / eski qarzlar summasi', 'To‘langan jami',
-                'Qolgan qarz', 'Oxirgi to‘lov sanasi', 'Holat',
-                'Bog‘langan sotuv/qarz IDlari',
-                ('Davrdan oldingi qarz qoldig‘i' if start
-                 else 'Boshlang‘ich qarz qoldig‘i'),
-            ]
-            debt_data = [[
-                row['name'], row['phone'], row['owner'], row['total'],
-                row['paid'], row['debt'], date_value(row['last_payment']),
-                row['status'], row['ids'], row['prior_debt'],
-            ] for row in debt_rows]
-            debt_total = [
-                'JAMI', '', '', sum((row['total'] for row in debt_rows), zero),
-                sum((row['paid'] for row in debt_rows), zero),
-                sum((row['debt'] for row in debt_rows), zero), '', '', '',
-                sum((row['prior_debt'] for row in debt_rows), zero),
-            ]
-            paint_table(
-                debt_ws, 'QARZLAR — davr oxiridagi ochiq majburiyatlar',
-                debt_headers, debt_data,
-                [25, 18, 22, 25, 20, 20, 19, 20, 32, 27],
-                status_index=8, total_values=debt_total,
-                money_columns=(4, 5, 6, 10),
-            )
-
-            payment_headers = [
-                'To‘lov sanasi', 'To‘lov ID', 'Xaridor',
-                'Bog‘langan sotuv ID', 'To‘lov summasi', 'To‘lov turi',
-                'Pulni qabul qilgan shaxs', 'Sotuv uchun mas’ul xodim', 'Izoh',
-            ]
-            payment_data = [[
-                date_value(row['date']), row['id'], row['customer'],
-                f"S-{row['sale_id']}" if row['sale_id'] else '',
-                row['amount'], row['method'], row['recipient'], row['owner'],
-                row['note'],
-            ] for row in events]
-            payment_total = [
-                'JAMI', '', '', '', period_paid, '', '', '',
-                'Kassa ichidagi o‘tkazmalar va accountant_worker_receipts dublikatlari kiritilmagan.',
-            ]
-            paint_table(
-                payments_ws, 'TO‘LOVLAR — davrda haqiqatan qabul qilingan mablag‘lar',
-                payment_headers, payment_data,
-                [16, 19, 26, 20, 20, 19, 24, 24, 55],
-                total_values=payment_total,
-                money_columns=(5,),
-            )
-
-            customer_headers = [
-                'Xaridor ID', 'Hozirgi to‘g‘ri nomi', 'Telefon',
-                'Jami xarid summasi (davr)', 'Jami to‘langan summa (davr)',
-                'Qolgan qarz (davr oxiri)', 'Oxirgi sotuv sanasi', 'Holat',
-            ]
-            customer_data = [[
-                row['id'], row['name'], row['phone'], row['sales'], row['paid'],
-                row['debt'], date_value(row['last_sale']), row['status'],
-            ] for row in customer_rows]
-            customer_total = [
-                'JAMI', '', '',
-                sum((row['sales'] for row in customer_rows), zero),
-                sum((row['paid'] for row in customer_rows), zero),
-                sum((row['debt'] for row in customer_rows), zero), '', '',
-            ]
-            paint_table(
-                customers_ws, 'MIJOZLAR — customers.id bo‘yicha jamlangan',
-                customer_headers, customer_data,
-                [14, 28, 19, 25, 26, 25, 19, 20],
-                status_index=8, total_values=customer_total,
-                money_columns=(4, 5, 6),
-            )
-
-            for ws in wb.worksheets:
-                ws.sheet_properties.pageSetUpPr.fitToPage = True
-                ws.oddFooter.center.text = 'TO‘RTKO‘LDONMAHSULOTI MCHJ — maxfiy ichki hisobot'
-                ws.oddFooter.right.text = 'Sahifa &[Page] / &[Pages]'
-            output = BytesIO()
-            wb.save(output)
-            import xml.etree.ElementTree as ET
-            from zipfile import ZIP_DEFLATED, ZipFile
-
-            spreadsheet_ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
-            office_rel_ns = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-            package_rel_ns = 'http://schemas.openxmlformats.org/package/2006/relationships'
-            content_ns = 'http://schemas.openxmlformats.org/package/2006/content-types'
-            drawing_ns = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
-            drawingml_ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
-
-            def serialize_xml(root, default_namespace, prefixes=()):
-                ET.register_namespace('', default_namespace)
-                for prefix, namespace in prefixes:
-                    ET.register_namespace(prefix, namespace)
-                return ET.tostring(root, encoding='utf-8', xml_declaration=True)
-
-            replacements = {}
-            additions = {}
-            with ZipFile(BytesIO(output.getvalue()), 'r') as source:
-                content_types = ET.fromstring(source.read('[Content_Types].xml'))
-                if not any(
-                        node.tag == f'{{{content_ns}}}Default'
-                        and node.get('Extension') == 'png'
-                        for node in content_types):
-                    ET.SubElement(content_types, f'{{{content_ns}}}Default', {
-                        'Extension': 'png', 'ContentType': 'image/png',
-                    })
-                drawing_name = 'xl/drawings/drawing1.xml'
-                if not any(
-                        node.tag == f'{{{content_ns}}}Override'
-                        and node.get('PartName') == '/xl/drawings/drawing1.xml'
-                        for node in content_types):
-                    ET.SubElement(content_types, f'{{{content_ns}}}Override', {
-                        'PartName': '/xl/drawings/drawing1.xml',
-                        'ContentType': 'application/vnd.openxmlformats-officedocument.drawing+xml',
-                    })
-                sheet_name = 'xl/worksheets/sheet1.xml'
-                sheet_root = ET.fromstring(source.read(sheet_name))
-                relation_name = 'xl/worksheets/_rels/sheet1.xml.rels'
-                if relation_name in source.namelist():
-                    sheet_relations = ET.fromstring(source.read(relation_name))
-                else:
-                    sheet_relations = ET.Element(f'{{{package_rel_ns}}}Relationships')
-                existing_ids = {node.get('Id') for node in sheet_relations}
-                relation_number = 1
-                while f'rId{relation_number}' in existing_ids:
-                    relation_number += 1
-                drawing_relation_id = f'rId{relation_number}'
-                ET.SubElement(sheet_relations, f'{{{package_rel_ns}}}Relationship', {
-                    'Id': drawing_relation_id,
-                    'Type': f'{office_rel_ns}/drawing',
-                    'Target': '../drawings/drawing1.xml',
-                })
-                drawing_element = ET.Element(
-                    f'{{{spreadsheet_ns}}}drawing',
-                    {f'{{{office_rel_ns}}}id': drawing_relation_id},
-                )
-                insert_before = {
-                    'legacyDrawing', 'legacyDrawingHF', 'picture', 'oleObjects',
-                    'controls', 'webPublishItems', 'tableParts', 'extLst',
-                }
-                insert_at = next(
-                    (index for index, child in enumerate(list(sheet_root))
-                     if child.tag.rsplit('}', 1)[-1] in insert_before),
-                    len(sheet_root),
-                )
-                sheet_root.insert(insert_at, drawing_element)
-                replacements[sheet_name] = serialize_xml(
-                    sheet_root, spreadsheet_ns, (('r', office_rel_ns),))
-                serialized_sheet_relations = serialize_xml(
-                    sheet_relations, package_rel_ns)
-                if relation_name in source.namelist():
-                    replacements[relation_name] = serialized_sheet_relations
-                else:
-                    additions[relation_name] = serialized_sheet_relations
-
-                drawing_root = ET.Element(f'{{{drawing_ns}}}wsDr')
-                anchor = ET.SubElement(drawing_root, f'{{{drawing_ns}}}oneCellAnchor')
-                origin = ET.SubElement(anchor, f'{{{drawing_ns}}}from')
-                for name, value in (
-                        ('col', '0'), ('colOff', '0'), ('row', '0'), ('rowOff', '0')):
-                    ET.SubElement(origin, f'{{{drawing_ns}}}{name}').text = value
-                ET.SubElement(anchor, f'{{{drawing_ns}}}ext', {
-                    'cx': '914400', 'cy': '914400',
-                })
-                picture = ET.SubElement(anchor, f'{{{drawing_ns}}}pic')
-                non_visual = ET.SubElement(picture, f'{{{drawing_ns}}}nvPicPr')
-                ET.SubElement(non_visual, f'{{{drawing_ns}}}cNvPr', {
-                    'id': '1', 'name': 'TO‘RTKO‘LDONMAHSULOTI logotipi',
-                })
-                ET.SubElement(
-                    ET.SubElement(non_visual, f'{{{drawing_ns}}}cNvPicPr'),
-                    f'{{{drawingml_ns}}}picLocks', {'noChangeAspect': '1'})
-                fill = ET.SubElement(picture, f'{{{drawing_ns}}}blipFill')
-                ET.SubElement(fill, f'{{{drawingml_ns}}}blip', {
-                    f'{{{office_rel_ns}}}embed': 'rId1',
-                })
-                stretch = ET.SubElement(fill, f'{{{drawingml_ns}}}stretch')
-                ET.SubElement(stretch, f'{{{drawingml_ns}}}fillRect')
-                shape = ET.SubElement(picture, f'{{{drawing_ns}}}spPr')
-                geometry = ET.SubElement(shape, f'{{{drawingml_ns}}}prstGeom', {
-                    'prst': 'rect',
-                })
-                ET.SubElement(geometry, f'{{{drawingml_ns}}}avLst')
-                ET.SubElement(anchor, f'{{{drawing_ns}}}clientData')
-                additions[drawing_name] = serialize_xml(
-                    drawing_root, drawing_ns, (('a', drawingml_ns), ('r', office_rel_ns)))
-                drawing_relations = ET.Element(f'{{{package_rel_ns}}}Relationships')
-                ET.SubElement(drawing_relations, f'{{{package_rel_ns}}}Relationship', {
-                    'Id': 'rId1', 'Type': f'{office_rel_ns}/image',
-                    'Target': '../media/unified_report_logo.png',
-                })
-                additions['xl/drawings/_rels/drawing1.xml.rels'] = serialize_xml(
-                    drawing_relations, package_rel_ns)
-                additions['xl/media/unified_report_logo.png'] = logo_path.read_bytes()
-                replacements['[Content_Types].xml'] = serialize_xml(
-                    content_types, content_ns)
-                embedded = BytesIO()
-                with ZipFile(embedded, 'w', ZIP_DEFLATED) as destination:
-                    for item in source.infolist():
-                        destination.writestr(
-                            item, replacements.get(item.filename, source.read(item.filename)))
-                    for name, data in additions.items():
-                        destination.writestr(name, data)
-            output = BytesIO(embedded.getvalue())
-            output.seek(0)
-            return send_file(
-                output, as_attachment=True,
-                download_name='tortkuldon_yagona_hisobot.xlsx',
-                mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                max_age=0,
-            )
-        finally:
-            con.close()
-    except ValueError as exc:
-        abort(400, f'Yagona hisobotni yaratib bo‘lmadi: {exc}')
+    return export_unified_excel_report({
+        'BASE_DIR': BASE_DIR,
+        'Decimal': Decimal,
+        'Path': Path,
+        'ROLES': ROLES,
+        'abort': abort,
+        'calculate_financial_snapshot': calculate_financial_snapshot,
+        'customer_display': customer_display,
+        'customer_identity_context': customer_identity_context,
+        'date': date,
+        'db': db,
+        'request': request,
+        'resolve_customer_identity': resolve_customer_identity,
+        'resolve_customer_name': resolve_customer_name,
+        'sqlite3': sqlite3,
+    })
 
 @app.route('/hisobot/excel')
 @login_required
 def excel_report():
-    from excel_dates import format_date_columns, display_date
-    from date_sql import (
-        mixed_date_key_expression, mixed_date_to_iso,
-        register_mixed_date_key_function, validate_mixed_date_column,
-    )
-    from io import BytesIO
-    from flask import send_file, abort
-    from openpyxl import Workbook
-    from openpyxl import load_workbook
-    from openpyxl.styles import Font, PatternFill, Alignment
-    from openpyxl.worksheet.filters import AutoFilter
-    from openpyxl.utils import get_column_letter
-    from copy import copy
-    kinds = {'wheat':'Bug‘doy xaridi','cleaning':'Bug‘doy tozalash',
-             'production':'Ishlab chiqarish','sales':'Sotuvlar',
-             'debtors':'Xaridor qarzlari','payments':'To‘lovlar',
-             'expenses':'Xarajatlar','stocks':'Ombor qoldiqlari'}
-    kind=request.args.get('type','')
-    if kind not in kinds: abort(400, 'Hisobot turini tanlang.')
-    start=request.args.get('start','').strip(); end=request.args.get('end','').strip()
-    try:
-        if start: start = mixed_date_to_iso(start)
-        if end: end = mixed_date_to_iso(end)
-        if start and end and start>end: raise ValueError()
-    except ValueError:
-        abort(400, 'Sana oralig‘i noto‘g‘ri; YYYY-MM-DD yoki DD-MM-YYYY formatidan foydalaning.')
-    if kind == 'production':
-        template_path = Path(BASE_DIR) / 'static' / 'production_report_template.xlsx'
-        if not template_path.is_file():
-            abort(500, 'Ishlab chiqarish Excel dizayn shabloni topilmadi.')
-        wb = load_workbook(template_path)
-        ws = wb['Umumiy ishlab chiqarish']
-    else:
-        wb = Workbook()
-        ws = wb.active
-        ws.title = kinds[kind][:31]
-    def query(con,sql,args=(),column='date',table=None):
-        try:
-            validate_mixed_date_column(con, table, column)
-        except ValueError as exc:
-            abort(400, f'Hisobotdagi sana yaroqsiz: {exc}')
-        register_mixed_date_key_function(con)
-        date_key = mixed_date_key_expression(column)
-        filters=[]; params=list(args)
-        if start: filters.append(f'{date_key}>=?'); params.append(start)
-        if end: filters.append(f'{date_key}<=?'); params.append(end)
-        sql, order_separator, ordering = sql.partition(' ORDER BY ')
-        if order_separator:
-            ordering = re.sub(
-                rf'\b{re.escape(column)}\b', date_key, ordering, count=1
-            )
-        else:
-            order_separator = ' ORDER BY '
-            ordering = f'{date_key}, id'
-        if filters:
-            sql += (' AND ' if ' WHERE ' in sql else ' WHERE ')+' AND '.join(filters)
-        if order_separator:
-            sql += order_separator + ordering
-        return con.execute(sql,params).fetchall()
-    def financial_snapshot(con):
-        try:
-            return calculate_financial_snapshot(con)
-        except ValueError as exc:
-            abort(400, f'Moliyaviy hisobotni yaratib bo‘lmadi: {exc}')
-    with db() as con:
-        if kind=='wheat':
-            ws.append(['Sana','Xarid turi','Yetkazuvchi','Kg','Narx / kg','Jami so‘m','Izoh'])
-            for r in query(con,'SELECT date,purchase_method,supplier,net,price_per_kg,note FROM wheat_receipts',table='wheat_receipts'):
-                ws.append([r['date'],r['purchase_method'],r['supplier'],r['net'],r['price_per_kg'],r['net']*r['price_per_kg'],r['note']])
-        elif kind in ('cleaning','production'):
-            prods=query(con,"""SELECT id,date,COALESCE(raw_wheat_kg,wheat_kg) raw,wheat_kg clean,
-                flour_kg,bran_kg,muchka_kg,telashka_kg,note FROM production""",table='production')
-            if kind=='cleaning':
-                ws.append(['Sana','Olingan kg','Tozalangan kg','Kamaygan kg','Kamayish %'])
-                for r in prods:
-                    ws.append([r['date'],r['raw'],r['clean'],r['raw']-r['clean'],round(100*(r['raw']-r['clean'])/r['raw'],2) if r['raw'] else 0])
-            else:
-                from datetime import datetime
-                from xml.etree import ElementTree as ET
-                from zipfile import ZIP_DEFLATED, ZipFile
-
-                bagged_products = BAGGED_FLOUR_PRODUCTS
-                detail_by_id = {}
-                for r in prods:
-                    types={x['product']:x['qty_kg'] for x in con.execute('SELECT product,qty_kg FROM production_flour_types WHERE production_id=?',(r['id'],))}
-                    bags = {(p, size): count for p, size, count in con.execute(
-                        'SELECT product,bag_kg,bag_count FROM bagged_production_lines '
-                        'WHERE production_id=?', (r['id'],))}
-                    bag_kg = {
-                        product: sum(
-                            size * bags.get((product, size), 0) for size in (25, 50)
-                        )
-                        for product in bagged_products
-                    }
-                    product_kg = {
-                        product: float(types[product])
-                        if product in types else float(bag_kg[product])
-                        for product in bagged_products
-                    }
-                    classified_kg = sum(product_kg.values()) + float(types.get('Qora un', 0) or 0)
-                    flour_kg = float(r['flour_kg'] or 0)
-                    detail_by_id[r['id']] = {
-                        'types': types, 'bags': bags, 'bag_kg': bag_kg,
-                        'product_kg': product_kg,
-                        'classification_gap': flour_kg - classified_kg,
-                    }
-
-                layout_sheet = wb['Oliy va 1-nav un']
-                summary_labels = ('Jami 25 kg qop', 'Jami 50 kg qop', 'Jami qop', 'Jami un, kg')
-                summary_label_styles = [
-                    copy(layout_sheet.cell(15, column)._style)
-                    for column in (1, 3, 5, 7)
-                ]
-                summary_value_styles = [
-                    copy(layout_sheet.cell(16, column)._style)
-                    for column in (1, 3, 5, 7)
-                ]
-                summary_row_heights = {
-                    row: layout_sheet.row_dimensions[row].height
-                    for row in (15, 16, 17, 19)
-                }
-                summary_note = layout_sheet['A19'].value
-                summary_note_style = copy(layout_sheet['A19']._style)
-                period_cells = {
-                    'Umumiy ishlab chiqarish': 'I1',
-                    'Oliy va 1-nav un': 'G1',
-                    'Qora un': 'D1',
-                    'Kepak': 'D1',
-                    'Muchka': 'D1',
-                    'Telashka atxod': 'D1',
-                }
-                for sheet in wb.worksheets:
-                    for merged in list(sheet.merged_cells.ranges):
-                        if merged.min_row >= 8:
-                            sheet.unmerge_cells(str(merged))
-                    for row in sheet.iter_rows(
-                            min_row=8, max_row=sheet.max_row,
-                            max_col=sheet.max_column):
-                        for cell in row:
-                            cell.value = None
-
-                def report_date(value):
-                    return datetime.strptime(mixed_date_to_iso(value), '%Y-%m-%d')
-
-                def report_date_text(value):
-                    return report_date(value).strftime('%d.%m.%Y')
-
-                if start or end:
-                    period_start = report_date_text(start) if start else 'Cheklanmagan'
-                    period_end = report_date_text(end) if end else 'Cheklanmagan'
-                    period_text = f'{period_start} — {period_end}'
-                elif prods:
-                    period_text = (
-                        f'{report_date_text(prods[0]["date"])} — '
-                        f'{report_date_text(prods[-1]["date"])}'
-                    )
-                else:
-                    period_text = 'Ma’lumot yo‘q'
-                for sheet in wb.worksheets:
-                    sheet[period_cells[sheet.title]] = f'Hisobot davri:\n{period_text}'
-                    sheet.freeze_panes = 'A8'
-
-                def copy_report_row(sheet, target_row, source_row, columns):
-                    if target_row != source_row:
-                        source_height = sheet.row_dimensions[source_row].height
-                        if source_height is not None:
-                            sheet.row_dimensions[target_row].height = source_height
-                    for column in range(1, columns + 1):
-                        target = sheet.cell(target_row, column)
-                        source = sheet.cell(source_row, column)
-                        if target_row != source_row and source.has_style:
-                            target._style = copy(source._style)
-                        target.value = None
-
-                def write_report_row(sheet, target_row, values, style_row,
-                                     date_columns=(), text_columns=()):
-                    copy_report_row(sheet, target_row, style_row, len(values))
-                    for column, value in enumerate(values, 1):
-                        cell = sheet.cell(target_row, column)
-                        if column in date_columns and value:
-                            cell.value = report_date(value)
-                            cell.number_format = 'dd.mm.yyyy'
-                        else:
-                            cell.value = value
-                        if column in text_columns and isinstance(cell.value, str):
-                            cell.data_type = 's'
-
-                def set_report_table(sheet, headers, last_data_row):
-                    for column, heading in enumerate(headers, 1):
-                        sheet.cell(7, column).value = heading
-                        sheet.cell(7, column).data_type = 's'
-                    table_ref = (
-                        f'A7:{get_column_letter(len(headers))}'
-                        f'{max(7, last_data_row)}'
-                    )
-                    for table_name in sheet.tables:
-                        table = sheet.tables[table_name]
-                        if len(table.tableColumns) != len(headers):
-                            abort(500, f'{sheet.title} varag‘idagi jadval ustunlari mos emas.')
-                        table.ref = table_ref
-                        if table.autoFilter is None:
-                            table.autoFilter = AutoFilter(ref=table_ref)
-                        else:
-                            table.autoFilter.ref = table_ref
-                        for column, heading in zip(table.tableColumns, headers):
-                            column.name = heading
-
-                general = wb['Umumiy ishlab chiqarish']
-                general_headers = [
-                    'Sana', 'Olingan bug‘doy (kg)', 'Tozalangan bug‘doy (kg)',
-                    'Kamayish (kg)', 'Kamayish (%)', 'Jami un (kg)',
-                    'Kepak (kg)', 'Muchka (kg)', 'Telashka (kg)', 'Izoh',
-                ]
-                production_notes = {}
-                for r in prods:
-                    detail = detail_by_id[r['id']]
-                    note_parts = [str(r['note'])] if r['note'] else []
-                    gap = detail['classification_gap']
-                    if abs(gap) > 0.000001:
-                        if gap > 0:
-                            note_parts.append(f'Tasniflanmagan un: {gap:g} kg')
-                        else:
-                            note_parts.append(f'Tasniflangan un farqi: {gap:g} kg')
-                    for product in bagged_products:
-                        bag_gap = detail['bag_kg'][product] - detail['product_kg'][product]
-                        if abs(bag_gap) > 0.000001:
-                            note_parts.append(f'{product} qop/kg farqi: {bag_gap:+g} kg')
-                    production_notes[r['id']] = '; '.join(note_parts)
-                for index, r in enumerate(prods):
-                    row_number = 8 + index
-                    raw = float(r['raw'] or 0)
-                    cleaned = float(r['clean'] or 0)
-                    loss = raw - cleaned
-                    write_report_row(
-                        general, row_number,
-                        [r['date'], raw, cleaned, loss,
-                         loss / raw if raw else 0,
-                         float(r['flour_kg'] or 0), float(r['bran_kg'] or 0),
-                         float(r['muchka_kg'] or 0), float(r['telashka_kg'] or 0),
-                         production_notes[r['id']]],
-                        8, date_columns=(1,), text_columns=(10,),
-                    )
-                general_total_row = 8 + len(prods)
-                copy_report_row(general, general_total_row, 11, 10)
-                general_raw = sum(float(r['raw'] or 0) for r in prods)
-                general_cleaned = sum(float(r['clean'] or 0) for r in prods)
-                general_loss = general_raw - general_cleaned
-                general_totals = [
-                    'JAMI', general_raw, general_cleaned, general_loss,
-                    general_loss / general_raw if general_raw else 0,
-                    sum(float(r['flour_kg'] or 0) for r in prods),
-                    sum(float(r['bran_kg'] or 0) for r in prods),
-                    sum(float(r['muchka_kg'] or 0) for r in prods),
-                    sum(float(r['telashka_kg'] or 0) for r in prods), None,
-                ]
-                for column, value in enumerate(general_totals, 1):
-                    cell = general.cell(general_total_row, column)
-                    cell.value = value
-                    if column == 1:
-                        cell.data_type = 's'
-                set_report_table(general, general_headers, 7 + len(prods))
-
-                white = wb['Oliy va 1-nav un']
-                white_headers = [
-                    'Sana', 'Ishlab chiqarish ID', 'Un mahsuloti',
-                    '25 kg qop soni', '50 kg qop soni', 'Jami qop soni',
-                    'Jami kg', 'Izoh',
-                ]
-                white_rows = []
-                white_bag_25 = white_bag_50 = 0
-                for r in prods:
-                    detail = detail_by_id[r['id']]
-                    for product in bagged_products:
-                        count_25 = int(detail['bags'].get((product, 25), 0))
-                        count_50 = int(detail['bags'].get((product, 50), 0))
-                        product_kg = detail['product_kg'][product]
-                        if not product_kg and not count_25 and not count_50:
-                            continue
-                        note_parts = []
-                        if r['note']:
-                            note_parts.append(str(r['note']))
-                        bag_gap = detail['bag_kg'][product] - product_kg
-                        if abs(bag_gap) > 0.000001:
-                            note_parts.append(f'Qop kilogrammi va mahsulot yozuvi farqi: {bag_gap:+g} kg')
-                        if product not in detail['types'] and (count_25 or count_50):
-                            note_parts.append('Mahsulot kg yozuvi yo‘q; kg qop hisobidan ko‘rsatildi')
-                        white_rows.append([
-                            r['date'], r['id'], product, count_25, count_50,
-                            count_25 + count_50, product_kg, '; '.join(note_parts) or None,
-                        ])
-                        white_bag_25 += count_25
-                        white_bag_50 += count_50
-                    gap = detail['classification_gap']
-                    if gap > 0.000001:
-                        white_rows.append([
-                            r['date'], r['id'], 'Eski tasniflanmagan un',
-                            0, 0, 0, gap,
-                            'Qop o‘lchami noma’lum yoki mahsulot turi tasniflanmagan.',
-                        ])
-                    elif gap < -0.000001:
-                        white_rows.append([
-                            r['date'], r['id'], 'Hisob farqi (jami un - tasnif)',
-                            0, 0, 0, gap,
-                            f'Tasniflangan jami un umumiy undan {abs(gap):g} kg ko‘p.',
-                        ])
-                for index, values in enumerate(white_rows):
-                    source_row = 8 if values[2] == 'Eski tasniflanmagan un' else 9
-                    write_report_row(
-                        white, 8 + index, values, source_row,
-                        date_columns=(1,), text_columns=(3, 8),
-                    )
-                white_total_row = 8 + len(white_rows)
-                copy_report_row(white, white_total_row, 13, 8)
-                white_kg_total = sum(float(row[6] or 0) for row in white_rows)
-                white_totals = [
-                    'JAMI', None, None, white_bag_25, white_bag_50,
-                    white_bag_25 + white_bag_50, white_kg_total, None,
-                ]
-                for column, value in enumerate(white_totals, 1):
-                    cell = white.cell(white_total_row, column)
-                    cell.value = value
-                    if column == 1:
-                        cell.data_type = 's'
-                set_report_table(white, white_headers, 7 + len(white_rows))
-
-                summary_label_row = white_total_row + 2
-                summary_value_row = summary_label_row + 1
-                for target_row, source_row in (
-                        (summary_label_row, 15), (summary_value_row, 16),
-                        (summary_value_row + 1, 17), (summary_label_row + 4, 19)):
-                    if summary_row_heights[source_row] is not None:
-                        white.row_dimensions[target_row].height = summary_row_heights[source_row]
-                summary_columns = (1, 3, 5, 7)
-                summary_values = (
-                    white_bag_25, white_bag_50,
-                    white_bag_25 + white_bag_50, white_kg_total,
-                )
-                for index, column in enumerate(summary_columns):
-                    white.merge_cells(
-                        start_row=summary_label_row, start_column=column,
-                        end_row=summary_label_row, end_column=column + 1,
-                    )
-                    label_cell = white.cell(summary_label_row, column)
-                    label_cell._style = copy(summary_label_styles[index])
-                    label_cell.value = summary_labels[index]
-                    label_cell.data_type = 's'
-                    white.merge_cells(
-                        start_row=summary_value_row, start_column=column,
-                        end_row=summary_value_row + 1, end_column=column + 1,
-                    )
-                    value_cell = white.cell(summary_value_row, column)
-                    value_cell._style = copy(summary_value_styles[index])
-                    value_cell.value = summary_values[index]
-                note_row = summary_label_row + 4
-                white.merge_cells(
-                    start_row=note_row, start_column=1,
-                    end_row=note_row, end_column=8,
-                )
-                note_cell = white.cell(note_row, 1)
-                note_cell._style = copy(summary_note_style)
-                note_cell.value = summary_note
-                note_cell.data_type = 's'
-
-                def fill_product_sheet(sheet_name, header, rows, total_label='JAMI'):
-                    sheet = wb[sheet_name]
-                    for index, values in enumerate(rows):
-                        write_report_row(
-                            sheet, 8 + index, values, 8,
-                            date_columns=(1,), text_columns=(4,),
-                        )
-                    total_row = 8 + len(rows)
-                    copy_report_row(sheet, total_row, 10, len(header))
-                    total_values = [None] * len(header)
-                    total_values[0] = total_label
-                    total_values[2] = sum(float(row[2] or 0) for row in rows)
-                    for column, value in enumerate(total_values, 1):
-                        sheet.cell(total_row, column).value = value
-                    sheet.merge_cells(
-                        start_row=total_row, start_column=1,
-                        end_row=total_row, end_column=2,
-                    )
-                    sheet.cell(total_row, 1).data_type = 's'
-                    set_report_table(sheet, header, 7 + len(rows))
-
-                by_product = {
-                    'Qora un': [],
-                    'Kepak': [],
-                    'Muchka': [],
-                    'Telashka atxod': [],
-                }
-                for r in prods:
-                    detail = detail_by_id[r['id']]
-                    for product in by_product:
-                        if product == 'Qora un':
-                            amount = float(detail['types'].get(product, 0) or 0)
-                        elif product == 'Kepak':
-                            amount = float(r['bran_kg'] or 0)
-                        elif product == 'Muchka':
-                            amount = float(r['muchka_kg'] or 0)
-                        else:
-                            amount = float(r['telashka_kg'] or 0)
-                        if amount:
-                            by_product[product].append([
-                                r['date'], r['id'], amount, r['note'],
-                            ])
-                product_headers = ['Sana', 'Ishlab chiqarish ID', 'Ishlab chiqarilgan kg', 'Izoh']
-                for product in ('Qora un', 'Kepak', 'Muchka', 'Telashka atxod'):
-                    fill_product_sheet(product, product_headers, by_product[product])
-        elif kind=='sales':
-            con.execute('BEGIN')
-            financial = financial_snapshot(con)
-            customer_context=customer_identity_context(con)
-            allocation = {item['id']: item for group in financial['customers'].values()
-                          for item in group['obligations'] if item['kind']=='sale'}
-            ws.append(['Sana','Xaridor','Telefon','Mahsulot','Sotuv turi','Qop kg','Qop soni','Jami kg','Birlik narxi','Jami so‘m','Sotuvda to‘langan','Keyingi to‘lovlar (worker_receipts)','Joriy qoldiq qarz','Qarz muddati','Eski to‘lovlardan FIFO','Jami to‘langan'])
-            for r in query(con,'SELECT * FROM sales WHERE id NOT IN (SELECT sale_id FROM sale_cancellations) ORDER BY date,id',table='sales'):
-                item = allocation[r['id']]
-                customer,phone=customer_display(
-                    customer_context,r['customer'],r['customer_phone'])
-                ws.append([r['date'],customer,phone,r['product'],r['sale_mode'],r['bag_kg'],r['bag_count'],r['qty_kg'],r['unit_price'],item['amount'],item['initial_paid'],item['linked_paid'],item['balance'],r['due_date'] if item['balance']>0 else '',item['legacy_applied'],item['initial_paid']+item['linked_paid']+item['legacy_applied']])
-            notes = wb.create_sheet('Izoh va ogohlantirishlar')
-            notes.append(['Mavzu','Tushuntirish'])
-            notes.append(['Sotuv sanasi filtri',f'{display_date(start)} — {display_date(end)}'])
-            notes.append(['Qarz holati','To‘lovlar va qarz eksport paytidagi bazaning joriy holatidir. Sana filtri faqat sotuv sanasiga tegishli; davrdan tashqaridagi barcha qayd etilgan to‘lovlar ham hisoblanadi. Bu davr oxiridagi tarixiy qarz hisoboti emas.'])
-            notes.append(['FIFO','Avval aniq bog‘langan to‘lovlar chegiriladi. Eski payments faqat bitta xaridor/telefon guruhiga ishonchli mos bo‘lsa, barcha sotuvlar va eski qarzlar orasida sana, eski qarz ustuvorligi va ID bo‘yicha FIFO taqsimlanadi. Bu tarixiy bog‘lanish isboti emas.'])
-            notes.append(['Jami to‘langan','Boshlang‘ich + worker_receipts + ushbu sotuvga FIFO. Buxgalter qabul qilgan worker_receipts bir marta sanaladi. Ortiqcha to‘lov boshqa sotuvga ko‘chirilmaydi; qoldiq manfiy bo‘lmaydi.'])
-            notes.append(['Ogohlantirishlar doirasi','Quyidagi ogohlantirishlar butun baza hisobiga tegishli, faqat tanlangan davrga emas. Eski qarzlar sotuv summasiga kiritilmagan.'])
-            messages = {'legacy_identity_ambiguous':'Bir xil ism, turli telefon: eski to‘lov taqsimlanmadi',
-                        'legacy_without_obligation':'Majburiyatga bog‘lanmagan eski to‘lov',
-                        'legacy_fifo_not_explicit_link':'Eski to‘lov FIFO hisobida, aniq sotuv bog‘lanishi yo‘q',
-                        'sale_overpaid':'Sotuvda ortiqcha to‘lov',
-                        'receipt_without_active_sale':'Faol sotuvga bog‘lanmagan keyingi to‘lov',
-                        'cancelled_sale_initial_payment':'Bekor qilingan sotuvda boshlang‘ich to‘lov',
-                        'accountant_receipt_mismatch':'Buxgalter to‘lovi bilan manba yozuvi mos emas',
-                        'accountant_receipt_without_source':'Buxgalter to‘lovining manba yozuvi yo‘q'}
-            for warning in financial['warnings']:
-                notes.append([messages.get(warning['code'],warning['code']),json.dumps(warning,ensure_ascii=False,default=str)])
-            for row in financial['unallocated_legacy']:
-                notes.append(['Taqsimlanmagan eski to‘lov',json.dumps(row,ensure_ascii=False,default=str)])
-            for group in financial['customers'].values():
-                if group['legacy_excess']:
-                    notes.append(['Taqsimlanmagan ortiqcha eski to‘lov',json.dumps({'customer':group['customer'],'phone':group['phone'],'amount':group['legacy_excess']},ensure_ascii=False,default=str)])
-            notes.freeze_panes='A2'; notes.auto_filter.ref=notes.dimensions
-            notes.column_dimensions['A'].width=40; notes.column_dimensions['B'].width=100
-            for row in notes:
-                for cell in row:
-                    cell.data_type='s'; cell.alignment=Alignment(wrap_text=True)
-            for cell in notes[1]:
-                cell.font=Font(bold=True,color='FFFFFF'); cell.fill=PatternFill('solid',fgColor='175B42')
-        elif kind=='debtors':
-            con.execute('BEGIN')
-            financial = financial_snapshot(con)
-            debtors = debt_customers(con, financial=financial)
-            ws.append(['Xaridor','Telefon','Jami sotuv va eski qarz so‘m','To‘langan so‘m','Qolgan qarz so‘m','Eng yaqin muddat','Faol sotuvlar summasi','Eski qarz','Boshlang‘ich to‘lov','Keyingi to‘lov (worker_receipts)','Eski FIFO to‘lovi','Ortiqcha to‘lov'])
-            for r in debtors:
-                ws.append([r['customer'],'; '.join(phone or 'Ko‘rsatilmagan' for phone in r['phones']),r['total'],r['paid'],r['debt'],r['due_date'],r['sales_revenue'],r['opening_debt'],r['initial_paid'],r['linked_paid'],r['legacy_applied'],r['excess']])
-            notes = wb.create_sheet('Izoh va ogohlantirishlar')
-            debt_total = sum(r['debt'] for r in debtors)
-            notes.append(['Mavzu','Qiymat yoki tushuntirish'])
-            notes.append(['Eksportdagi jami qarz',debt_total])
-            notes.append(['Umumiy moduldagi jami qarz',financial['totals']['debt']])
-            notes.append(['Qarz farqi',financial['totals']['debt']-debt_total])
-            notes.append(['Davr','Joriy qarzdorlar va barcha qayd etilgan to‘lovlar hisoblanadi. Sana filtri bu eksportga qo‘llanmaydi; bu tarixiy sana holatidagi qarz hisoboti emas.'])
-            notes.append(['To‘langan so‘m','Qarzdorlar sahifasidagi kabi boshlang‘ich + worker_receipts + xaridorga ishonchli bog‘langan eski payments. Eski FIFO ustuni faqat majburiyatlarga ajratilgan qism. Ortiqcha pul ham qabul qilingan pul tarkibida, ammo boshqa majburiyat yoki xaridor qarzidan chegirilmaydi.'])
-            notes.append(['Hisoblash','Eski qarz faol sotuv daromadiga kirmaydi. Buxgalter qabul qilgan worker_receipts bir marta hisoblanadi. Nol qoldiqli xaridorlar asosiy varaqda yo‘q.'])
-            notes.append(['FIFO','Eski to‘lov faqat bitta ism/telefon guruhiga mos bo‘lsa, avval aniq bog‘langan to‘lovlar chegirilib, sana, eski qarz ustuvorligi va ID tartibida taqsimlanadi. FIFO tarixiy sotuv bog‘lanishining isboti emas.'])
-            messages = {'legacy_identity_ambiguous':'Bir xil ism, turli telefon: eski to‘lov taqsimlanmadi',
-                        'legacy_without_obligation':'Majburiyatga bog‘lanmagan eski to‘lov',
-                        'legacy_fifo_not_explicit_link':'Eski to‘lov FIFO hisobida, aniq sotuv bog‘lanishi yo‘q',
-                        'sale_overpaid':'Sotuvda ortiqcha to‘lov',
-                        'receipt_without_active_sale':'Faol sotuvga bog‘lanmagan keyingi to‘lov',
-                        'cancelled_sale_initial_payment':'Bekor qilingan sotuvda boshlang‘ich to‘lov',
-                        'accountant_receipt_mismatch':'Buxgalter to‘lovi bilan manba yozuvi mos emas',
-                        'accountant_receipt_without_source':'Buxgalter to‘lovining manba yozuvi yo‘q'}
-            for warning in financial['warnings']:
-                notes.append([messages.get(warning['code'],warning['code']),json.dumps(warning,ensure_ascii=False,default=str)])
-            for row in financial['unallocated_legacy']:
-                notes.append(['Taqsimlanmagan eski to‘lov',json.dumps(row,ensure_ascii=False,default=str)])
-            phones_by_name = {}
-            for (name, phone), group in financial['customers'].items():
-                phones_by_name.setdefault(name,set()).add(phone)
-                if group['legacy_excess'] or group['linked_excess']:
-                    notes.append(['Ortiqcha to‘lov (nol qarzli xaridorlar ham)',json.dumps({'customer':name,'phone':phone,'legacy_excess':group['legacy_excess'],'linked_excess':group['linked_excess']},ensure_ascii=False,default=str)])
-            for name, phones in phones_by_name.items():
-                if len(phones)>1:
-                    notes.append(['Bir xil ismli xaridorlar alohida hisoblandi',json.dumps({'customer':name,'phones':sorted(phones)},ensure_ascii=False)])
-            notes.freeze_panes='A2'; notes.auto_filter.ref=notes.dimensions
-            notes.column_dimensions['A'].width=40; notes.column_dimensions['B'].width=100
-            for row in notes:
-                for cell in row:
-                    if isinstance(cell.value,str): cell.data_type='s'
-                    cell.alignment=Alignment(wrap_text=True)
-            for cell in notes[1]:
-                cell.font=Font(bold=True,color='FFFFFF'); cell.fill=PatternFill('solid',fgColor='175B42')
-        elif kind=='payments':
-            from decimal import Decimal
-            con.execute('BEGIN')
-            financial = financial_snapshot(con)
-            customer_context=customer_identity_context(con)
-            users = {r['id']:r['username'] for r in con.execute('SELECT id,username FROM users')}
-            sales = {r['id']:dict(r) for r in con.execute('SELECT * FROM sales')}
-            cancelled = {r['sale_id'] for r in con.execute('SELECT sale_id FROM sale_cancellations')}
-            direct = {r['receipt_id']:dict(r) for r in con.execute('SELECT * FROM accountant_worker_receipts')}
-            batches = {r['sale_id']:r['batch_id'] for r in con.execute('SELECT * FROM worker_sale_batch_items')}
-            batch_channels = {}
-            for r in con.execute('SELECT * FROM worker_sale_batch_payments ORDER BY id'):
-                batch_channels.setdefault(r['batch_id'],[]).append(dict(r))
-            ws.append(['Sana','Xaridor','Telefon','Qabul qilingan summa','Izoh','To‘lov turi','Manba','Manba ID','Qabul qiluvchi / yozuvdagi foydalanuvchi','Tegishli xodim','Kanal (yozuv bo‘yicha)'])
-            events = []
-            for r in query(con,'SELECT * FROM sales WHERE paid>0 ORDER BY date,id',table='sales'):
-                note = r['note'] or ''
-                channel = r['payment_method']
-                if r['id'] in batches:
-                    batch_id = batches[r['id']]
-                    channel = ''
-                    note += ' | Paket '+str(batch_id)+': sales.paid — taqsimlangan boshlang‘ich summa; kanal sotuvga aniq bog‘lanmagan. Paket kanallari (qayta qo‘shilmaydi): '+json.dumps(batch_channels.get(batch_id,[]),ensure_ascii=False)
-                if r['id'] in cancelled: note += ' | Bekor qilingan sotuvdagi pul yozuvi; avtomatik qaytarilgan deb hisoblanmadi.'
-                if not users.get(r['user_id']): note += ' | Qabul qiluvchi aniqlanmagan.'
-                customer,phone=customer_display(
-                    customer_context,r['customer'],r['customer_phone'])
-                events.append([r['date'],customer,phone,Decimal(str(r['paid'])),note,'Boshlang‘ich sotuv to‘lovi','sales.paid',r['id'],users.get(r['user_id'],''),users.get(r['user_id'],''),channel])
-            for r in query(con,'SELECT * FROM payments ORDER BY date,id',table='payments'):
-                customer,_=customer_display(customer_context,r['customer'])
-                events.append([r['date'],customer,'',Decimal(str(r['amount'])),r['note'] or '','Eski to‘lov','payments',r['id'],'','',''])
-            for r in query(con,'SELECT * FROM worker_receipts ORDER BY date,id',table='worker_receipts'):
-                sale = sales.get(r['sale_id'],{})
-                accountant = direct.get(r['id'])
-                recipient = accountant['accountant_id'] if accountant else r['worker_id']
-                note = accountant['note'] if accountant else ''
-                if not sale or r['sale_id'] in cancelled: note += ' | Faol sotuvga bog‘lanmagan pul yozuvi.'
-                if not users.get(recipient): note += ' | Qabul qiluvchi aniqlanmagan.'
-                if accountant and (accountant['payment_date']!=r['date'] or accountant['amount']!=r['amount'] or accountant['payment_method']!=r['payment_method'] or accountant['worker_id']!=r['worker_id'] or accountant['customer']!=sale.get('customer') or accountant['customer_phone']!=sale.get('customer_phone')):
-                    note += ' | Buxgalter belgilashi manbaga mos emas; sana, summa, kanal worker_receipts yozuvidan olindi.'
-                customer,phone=customer_display(
-                    customer_context,sale.get('customer',''),sale.get('customer_phone',''))
-                events.append([r['date'],customer,phone,Decimal(str(r['amount'])),note,'Buxgalter olgan qarz to‘lovi' if accountant else 'Xodim olgan qarz to‘lovi','worker_receipts',r['id'],users.get(recipient,''),users.get(r['worker_id'],''),r['payment_method']])
-            for r in query(con,'SELECT * FROM opening_debt_receipts ORDER BY date,id',
-                           table='opening_debt_receipts'):
-                debt=con.execute('SELECT customer,customer_phone FROM opening_debts WHERE id=?',
-                                 (r['opening_debt_id'],)).fetchone()
-                if debt is None:
-                    continue
-                customer,phone=customer_display(customer_context,debt['customer'],debt['customer_phone'])
-                events.append([r['date'],customer,phone,Decimal(str(r['amount'])),
-                    (r['note'] or '')+' | Eski qarz #'+str(r['opening_debt_id']),
-                    'Eski qarz to‘lovi','opening_debt_receipts',r['id'],
-                    users.get(r['receiver_id'],''),users.get(r['worker_id'],''),r['payment_method']])
-            for row in sorted(events,key=lambda r:(mixed_date_to_iso(r[0]),r[6],r[7])): ws.append(row)
-            notes = wb.create_sheet('Izoh va ogohlantirishlar')
-            notes.append(['Mavzu','Qiymat yoki tushuntirish'])
-            notes.append(['Tanlangan davrda jami qabul qilingan pul',sum((r[3] for r in events),Decimal(0))])
-            notes.append(['Sana mezoni',f'{display_date(start)} — {display_date(end)}. Boshlang‘ich to‘lov: sales.date (alohida to‘lov sanasi yo‘q); eski to‘lov: payments.date; keyingi to‘lov: worker_receipts.date. Chegaralar kiritiladi.'])
-            notes.append(['Pul va daromad','Jami qabul qilingan pul sotuv daromadi emas. Ichki worker_transfers, accountant_worker_receipts va paket kanal summalari yangi pul sifatida qo‘shilmaydi.'])
-            notes.append(['Yozuv birligi','Manba + Manba ID noyob. Bitta haqiqiy to‘lov bir necha sotuvga bo‘lingan bo‘lsa, bazada umumiy hodisa ID yo‘qligi sabab satrlar taxmin bilan birlashtirilmaydi. Paket sales.paid summasi taqsimlangan qismdir.'])
-            notes.append(['Kanal aniqligi','naqd / plastik / hisob (bank). Eski yozuvlarga migratsiya naqd qiymatini bergan bo‘lishi mumkin; kanal ustuni bazadagi belgini ko‘rsatadi, tarixiy tasdiq emas. Paketlarda sotuvga kanal taqsimlanmaydi. Bo‘sh yoki noma’lum kanal taxmin bilan to‘ldirilmaydi.'])
-            notes.append(['Qabul qiluvchi','Boshlang‘ich to‘lovda sales.user_id — yozuvdagi foydalanuvchi. Keyingi to‘lovda worker_id yoki accountant_id. Eski payments uchun qabul qiluvchi tasdiqlanmagan.'])
-            notes.append(['Eski payments','Telefon, qabul qiluvchi va kanal aniq bog‘lanmaganligi sabab bo‘sh qoldirildi. Boshqa xaridor yozuvidan taxminan olinmadi; asl izoh saqlandi.'])
-            notes.append(['Barcha sanalar: modul tushumi',financial['totals']['received']])
-            if not start and not end:
-                notes.append(['Eksport va modul farqi',financial['totals']['received']-sum((r[3] for r in events),Decimal(0))])
-            notes.append(['Ogohlantirishlar doirasi','Quyidagi modul ogohlantirishlari barcha sanalarga tegishli. Bekor qilingan sotuvdagi qayd etilgan pul yo‘qolmaydi; qaytarish taxmin qilinmaydi.'])
-            for warning in financial['warnings']:
-                notes.append(['Modul ogohlantirishi',json.dumps(warning,ensure_ascii=False,default=str)])
-            for row in ws.iter_rows(min_row=2):
-                for cell in row:
-                    if isinstance(cell.value,str): cell.data_type='s'
-            notes.freeze_panes='A2'; notes.auto_filter.ref=notes.dimensions
-            notes.column_dimensions['A'].width=40; notes.column_dimensions['B'].width=100
-            for row in notes:
-                for cell in row:
-                    if isinstance(cell.value,str): cell.data_type='s'
-                    cell.alignment=Alignment(wrap_text=True)
-            for cell in notes[1]:
-                cell.font=Font(bold=True,color='FFFFFF'); cell.fill=PatternFill('solid',fgColor='175B42')
-        elif kind=='expenses':
-            ws.append(['Sana','Tizimga kiritgan shaxs','Toifa','Summa',
-                       'To‘lov kanali','Pul manbai','Izoh'])
-            expense_rows=query(con,'''SELECT e.*, entered.username AS entered_by_name,
-                    source.role AS source_role
-                    FROM expenses e
-                    LEFT JOIN users entered ON entered.id=COALESCE(e.entered_by,e.user_id)
-                    LEFT JOIN users source ON source.id=e.user_id
-                    ORDER BY date,e.id''',table='expenses')
-            for r in expense_rows:
-                item=expense_display(r)
-                ws.append([item['date'],item['entered_by_display'],
-                           item['category'],item['amount'],
-                           item['payment_method_display'],item['fund_source_display'],item['note']])
-        elif kind=='stocks':
-            ws.append(['Mahsulot','Joriy qoldiq kg'])
-            purchased=con.execute('SELECT COALESCE(SUM(net),0) FROM wheat_receipts').fetchone()[0]
-            used=con.execute('SELECT COALESCE(SUM(COALESCE(raw_wheat_kg,wheat_kg)),0) FROM production').fetchone()[0]
-            ws.append(['Bug‘doy',purchased-used])
-            for name,qty in product_stocks(con).items(): ws.append([name,qty])
-    if kind != 'production':
-        # Explicit text columns: preserve user input verbatim, never as a formula.
-        text_columns = {'wheat': (1,2,3,7), 'cleaning': (1,), 'sales': (1,2,3,4,5,14),
-                        'debtors': (1,2,6), 'payments': (1,2,3,5),
-                        'expenses': (1,2,3,5,6,7), 'stocks': (1,)}
-        for row in ws.iter_rows(min_row=2):
-            for column in text_columns[kind]:
-                cell = row[column-1]
-                if isinstance(cell.value, str):
-                    cell.data_type = 's'
-        ws.freeze_panes='A2'; ws.auto_filter.ref=ws.dimensions
-        for cell in ws[1]:
-            cell.font=Font(bold=True,color='FFFFFF');cell.fill=PatternFill('solid',fgColor='175B42');cell.alignment=Alignment(wrap_text=True)
-        for col in ws.columns:
-            letter=get_column_letter(col[0].column)
-            ws.column_dimensions[letter].width=min(40,max(15,max(len(str(c.value or '')) for c in list(col)[:150])+2))
-        date_columns = {'wheat': (1,), 'cleaning': (1,), 'sales': (1,14),
-                        'debtors': (6,), 'payments': (1,), 'expenses': (1,), 'stocks': ()}
-        try: format_date_columns(ws, date_columns[kind])
-        except ValueError as exc: abort(400, str(exc))
-    output=BytesIO();wb.save(output);output.seek(0)
-    if kind == 'production':
-        logo_path = Path(BASE_DIR) / 'static' / 'production_report_logo.png'
-        if not logo_path.is_file():
-            abort(500, 'Ishlab chiqarish Excel logotipi topilmadi.')
-        logo_bytes = logo_path.read_bytes()
-        spreadsheet_ns = 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'
-        office_rel_ns = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-        package_rel_ns = 'http://schemas.openxmlformats.org/package/2006/relationships'
-        content_ns = 'http://schemas.openxmlformats.org/package/2006/content-types'
-        drawing_ns = 'http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing'
-        drawingml_ns = 'http://schemas.openxmlformats.org/drawingml/2006/main'
-
-        def xlsx_xml(root, default_namespace, prefixes=()):
-            ET.register_namespace('', default_namespace)
-            for prefix, namespace in prefixes:
-                ET.register_namespace(prefix, namespace)
-            return ET.tostring(root, encoding='utf-8', xml_declaration=True)
-
-        def add_logo_to_workbook(workbook_bytes, image_bytes):
-            replacements = {}
-            additions = {}
-            with ZipFile(BytesIO(workbook_bytes), 'r') as source:
-                content_types = ET.fromstring(source.read('[Content_Types].xml'))
-                if not any(
-                        element.tag == f'{{{content_ns}}}Default'
-                        and element.get('Extension') == 'png'
-                        for element in content_types):
-                    ET.SubElement(content_types, f'{{{content_ns}}}Default', {
-                        'Extension': 'png', 'ContentType': 'image/png',
-                    })
-                for sheet_number in range(1, 7):
-                    drawing_name = f'xl/drawings/drawing{sheet_number}.xml'
-                    ET.SubElement(content_types, f'{{{content_ns}}}Override', {
-                        'PartName': f'/{drawing_name}',
-                        'ContentType': 'application/vnd.openxmlformats-officedocument.drawing+xml',
-                    })
-                    sheet_name = f'xl/worksheets/sheet{sheet_number}.xml'
-                    sheet_root = ET.fromstring(source.read(sheet_name))
-                    rel_name = f'xl/worksheets/_rels/sheet{sheet_number}.xml.rels'
-                    if rel_name in source.namelist():
-                        sheet_rels = ET.fromstring(source.read(rel_name))
-                    else:
-                        sheet_rels = ET.Element(f'{{{package_rel_ns}}}Relationships')
-                    used_ids = {item.get('Id') for item in sheet_rels}
-                    rel_id = 1
-                    while f'rId{rel_id}' in used_ids:
-                        rel_id += 1
-                    drawing_rel_id = f'rId{rel_id}'
-                    ET.SubElement(sheet_rels, f'{{{package_rel_ns}}}Relationship', {
-                        'Id': drawing_rel_id,
-                        'Type': f'{office_rel_ns}/drawing',
-                        'Target': f'../drawings/drawing{sheet_number}.xml',
-                    })
-                    drawing_element = ET.Element(
-                        f'{{{spreadsheet_ns}}}drawing',
-                        {f'{{{office_rel_ns}}}id': drawing_rel_id},
-                    )
-                    insert_before = {
-                        'legacyDrawing', 'legacyDrawingHF', 'picture', 'oleObjects',
-                        'controls', 'webPublishItems', 'tableParts', 'extLst',
-                    }
-                    insert_at = next(
-                        (index for index, child in enumerate(list(sheet_root))
-                         if child.tag.rsplit('}', 1)[-1] in insert_before),
-                        len(sheet_root),
-                    )
-                    sheet_root.insert(insert_at, drawing_element)
-                    replacements[sheet_name] = xlsx_xml(
-                        sheet_root, spreadsheet_ns, (('r', office_rel_ns),)
-                    )
-                    replacements[rel_name] = xlsx_xml(sheet_rels, package_rel_ns)
-
-                    drawing_root = ET.Element(f'{{{drawing_ns}}}wsDr')
-                    anchor = ET.SubElement(drawing_root, f'{{{drawing_ns}}}oneCellAnchor')
-                    origin = ET.SubElement(anchor, f'{{{drawing_ns}}}from')
-                    for name, value in (('col', '0'), ('colOff', '0'), ('row', '0'), ('rowOff', '0')):
-                        ET.SubElement(origin, f'{{{drawing_ns}}}{name}').text = value
-                    ET.SubElement(anchor, f'{{{drawing_ns}}}ext', {
-                        'cx': '1047750', 'cy': '1114425',
-                    })
-                    picture = ET.SubElement(anchor, f'{{{drawing_ns}}}pic')
-                    non_visual = ET.SubElement(picture, f'{{{drawing_ns}}}nvPicPr')
-                    ET.SubElement(non_visual, f'{{{drawing_ns}}}cNvPr', {
-                        'id': '1', 'name': f'Production report logo {sheet_number}',
-                    })
-                    ET.SubElement(
-                        ET.SubElement(non_visual, f'{{{drawing_ns}}}cNvPicPr'),
-                        f'{{{drawingml_ns}}}picLocks',
-                        {'noChangeAspect': '1'},
-                    )
-                    fill = ET.SubElement(picture, f'{{{drawing_ns}}}blipFill')
-                    ET.SubElement(fill, f'{{{drawingml_ns}}}blip', {
-                        f'{{{office_rel_ns}}}embed': 'rId1',
-                    })
-                    stretch = ET.SubElement(fill, f'{{{drawingml_ns}}}stretch')
-                    ET.SubElement(stretch, f'{{{drawingml_ns}}}fillRect')
-                    shape_properties = ET.SubElement(picture, f'{{{drawing_ns}}}spPr')
-                    geometry = ET.SubElement(shape_properties, f'{{{drawingml_ns}}}prstGeom', {
-                        'prst': 'rect',
-                    })
-                    ET.SubElement(geometry, f'{{{drawingml_ns}}}avLst')
-                    ET.SubElement(anchor, f'{{{drawing_ns}}}clientData')
-                    additions[drawing_name] = xlsx_xml(
-                        drawing_root, drawing_ns,
-                        (('a', drawingml_ns), ('r', office_rel_ns)),
-                    )
-                    drawing_rel_root = ET.Element(f'{{{package_rel_ns}}}Relationships')
-                    ET.SubElement(drawing_rel_root, f'{{{package_rel_ns}}}Relationship', {
-                        'Id': 'rId1',
-                        'Type': f'{office_rel_ns}/image',
-                        'Target': '../media/production_report_logo.png',
-                    })
-                    additions[
-                        f'xl/drawings/_rels/drawing{sheet_number}.xml.rels'
-                    ] = xlsx_xml(drawing_rel_root, package_rel_ns)
-                replacements['[Content_Types].xml'] = xlsx_xml(
-                    content_types, content_ns
-                )
-                additions['xl/media/production_report_logo.png'] = image_bytes
-                result = BytesIO()
-                with ZipFile(result, 'w', ZIP_DEFLATED) as destination:
-                    for item in source.infolist():
-                        destination.writestr(
-                            item, replacements.get(item.filename, source.read(item.filename))
-                        )
-                    for name, data in additions.items():
-                        destination.writestr(name, data)
-            return result.getvalue()
-
-        output = BytesIO(add_logo_to_workbook(output.getvalue(), logo_bytes))
-        output.seek(0)
-    return send_file(output,as_attachment=True,download_name=f'tortkuldon_{kind}.xlsx',
-        mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    return export_legacy_excel_report({
+        'BAGGED_FLOUR_PRODUCTS': BAGGED_FLOUR_PRODUCTS,
+        'BASE_DIR': BASE_DIR,
+        'Path': Path,
+        'calculate_financial_snapshot': calculate_financial_snapshot,
+        'customer_display': customer_display,
+        'customer_identity_context': customer_identity_context,
+        'db': db,
+        'debt_customers': debt_customers,
+        'expense_display': expense_display,
+        'json': json,
+        'product_stocks': product_stocks,
+        're': re,
+        'request': request,
+    })
 
 
-def sale_payment_allocations(con):
-    result = {}
-    names = [r[0] for r in con.execute('SELECT customer FROM sales UNION SELECT customer FROM opening_debts')]
-    for customer in names:
-        debts = []
-        for r in con.execute('SELECT id,date,qty_kg*price_per_kg-paid AS balance FROM sales WHERE customer=? AND id NOT IN (SELECT sale_id FROM sale_cancellations)', (customer,)):
-            if r['balance']>0: debts.append((r['date'],1,r['id'],r['balance']))
-        for r in con.execute('SELECT id,date,amount FROM opening_debts WHERE customer=?',(customer,)):
-            debts.append((r['date'],0,r['id'],r['amount']))
-        left=con.execute('SELECT COALESCE(SUM(amount),0) FROM payments WHERE customer=?',(customer,)).fetchone()[0]
-        for d,kind,id_,balance in sorted(debts):
-            allocated=min(max(0,left),balance);left-=allocated
-            if kind==1:result[id_]=allocated
-    return result
 
 def make_backup():
     folder = Path(os.environ.get('ERP_BACKUP_DIR') or os.environ.get('BACKUP_DIR') or (Path(BASE_DIR) / 'zaxira_nusxalar'))
@@ -5088,130 +3227,19 @@ def cancel_sale(sale_id):
         if con.execute('SELECT 1 FROM worker_receipts WHERE sale_id=? LIMIT 1',(sale_id,)).fetchone():
             flash('Bu sotuv bo‘yicha keyingi qarz to‘lovi mavjud. Sotuv bekor qilinmadi. Pul va mahsulot qaytarilishini buxgalter bilan alohida tekshiring.','error');return redirect(url_for('sales_page'))
         con.execute('INSERT INTO sale_cancellations(sale_id,reason,cancelled_at,user_id) VALUES(?,?,?,?)',(sale_id,reason,datetime.now().isoformat(timespec='seconds'),session['user_id']))
-    flash('Sotuv bekor qilindi, mahsulot omborga qaytdi. Nakladnoy raqami arxivda saqlandi.','success')
+    flash('Sotuv bekor qilindi. Ombor hisobida sotuv chiqimi tiklandi. Nakladnoy raqami arxivda saqlandi.','success')
     return redirect(url_for('sales_page'))
 
 @app.route('/xaridor/<path:customer>')
 @login_required
 def customer_statement(customer):
-    from decimal import Decimal
-    with db() as con:
-        con.execute('BEGIN')
-        financial = calculate_financial_snapshot(con)
-        customer_context=customer_identity_context(con)
-        requested_card=resolve_customer_name(customer_context,customer)
-        display_customer=requested_card['name'] if requested_card else customer
-        sales = {r['id']: dict(r) for r in con.execute(
-            'SELECT s.*,i.id invoice_id,i.number invoice_number FROM sales s '
-            'LEFT JOIN invoices i ON i.sale_id=s.id ORDER BY business_date_key(s.date),s.id')}
-        opening = {r['id']: dict(r) for r in con.execute(
-            'SELECT * FROM opening_debts ORDER BY business_date_key(date),id')}
-        legacy = {r['id']: dict(r) for r in con.execute(
-            'SELECT * FROM payments ORDER BY business_date_key(date),id')}
-        def belongs_to_statement(row):
-            card=resolve_customer_identity(
-                customer_context,row['customer'],row['customer_phone'])
-            if requested_card is not None:
-                return card is not None and card['id']==requested_card['id']
-            if card is not None:
-                return card['name']==display_customer
-            return row['customer']==display_customer
-
-        matching_sale_ids = {
-            sid for sid,row in sales.items() if belongs_to_statement(row)
-        }
-        opening_receipts = [dict(r) for r in con.execute(
-            'SELECT o.*,d.customer,d.customer_phone FROM opening_debt_receipts o '
-            'JOIN opening_debts d ON d.id=o.opening_debt_id')]
-        receipts = [r for r in financial['receipts'] if r['sale_id'] in matching_sale_ids]
-        receipt_ids = {r['id'] for r in receipts}
-        if matching_sale_ids:
-            placeholders=','.join('?' for _ in matching_sale_ids)
-            receipt_ids.update(row['receipt_id'] for row in con.execute(
-                'SELECT a.receipt_id FROM accountant_worker_receipts a '
-                'JOIN worker_receipts r ON r.id=a.receipt_id '
-                'WHERE r.sale_id IN ('+placeholders+')',tuple(matching_sale_ids)))
-        financial_warnings = [w for w in financial['warnings'] if
-            w.get('customer') == display_customer or w.get('sale_id') in matching_sale_ids
-            or w.get('receipt_id') in receipt_ids]
-        groups = []
-        active_sale_ids = set()
-        for key, totals in financial['customers'].items():
-            if key[0] != display_customer:
-                continue
-            group_sales, group_opening, history, raw_phones = [], [], [], set()
-            for item in totals['obligations']:
-                row = dict(sales[item['id']] if item['kind'] == 'sale' else opening[item['id']])
-                current_name,current_phone=customer_display(
-                    customer_context,row['customer'],row['customer_phone'])
-                row['customer']=current_name
-                row['customer_phone']=current_phone
-                raw_phones.add(current_phone)
-                row['calculation'] = item
-                if item['kind'] == 'sale':
-                    active_sale_ids.add(item['id'])
-                    group_sales.append(row)
-                    if item['initial_paid']:
-                        history.append({'kind':'initial','id':item['id'],'sale_id':item['id'],
-                            'date':row['date'],'amount':item['initial_paid'],'phone':row['customer_phone'],
-                            'recipient':'sale','note':'Sotuvdagi boshlang‘ich to‘lov'})
-                else:
-                    group_opening.append(row)
-            group_opening_ids = {r['id'] for r in group_opening}
-            for receipt in opening_receipts:
-                if receipt['opening_debt_id'] in group_opening_ids:
-                    _,current_phone = customer_display(
-                        customer_context,receipt['customer'],receipt['customer_phone'])
-                    history.append({'kind':'receipt','id':receipt['id'],
-                        'sale_id':None,'date':receipt['date'],
-                        'amount':Decimal(str(receipt['amount'])),
-                        'phone':current_phone,'recipient':receipt['received_by'],
-                        'note':'Eski qarz bo‘yicha to‘lov #'+str(receipt['opening_debt_id'])})
-            ids = {r['id'] for r in group_sales}
-            for receipt in receipts:
-                if receipt['sale_id'] in ids:
-                    sale=sales[receipt['sale_id']]
-                    _,current_phone=customer_display(
-                        customer_context,sale['customer'],sale['customer_phone'])
-                    history.append(dict(receipt,kind='receipt',phone=current_phone,
-                        note='Keyingi qarz to‘lovi'))
-            if totals['legacy_received']:
-                history.extend(dict(legacy[payment_id],kind='legacy',sale_id=None,
-                    phone='',recipient='legacy')
-                    for payment_id in totals['legacy_payment_ids'])
-            history.sort(key=lambda r:(_business_date(r['date'])[0],r['kind'],r['id']))
-            groups.append({'totals':totals,'phones':sorted(raw_phones),'sales':group_sales,
-                           'opening':group_opening,'history':history})
-        if len(groups) > 1:
-            financial_warnings.append({'code':'same_name_multiple_phones','customer':display_customer})
-        exception_history = []
-        for r in receipts:
-            if r['sale_id'] not in active_sale_ids:
-                sale=sales[r['sale_id']]
-                _,current_phone=customer_display(
-                    customer_context,sale['customer'],sale['customer_phone'])
-                exception_history.append(dict(r,kind='receipt',phone=current_phone,
-                    note='Faol sotuvga bog‘lanmagan keyingi to‘lov'))
-        for sid, row in sales.items():
-            if sid in matching_sale_ids and sid not in active_sale_ids and Decimal(str(row['paid'])):
-                _,current_phone=customer_display(
-                    customer_context,row['customer'],row['customer_phone'])
-                exception_history.append({'kind':'initial','id':sid,'sale_id':sid,'date':row['date'],
-                    'amount':Decimal(str(row['paid'])),'phone':current_phone,
-                    'recipient':'sale','note':'Bekor qilingan sotuvdagi boshlang‘ich to‘lov'})
-        customer_ids = (set(customer_context['name_to_ids'].get(customer, set()))
-                        if requested_card is None else {requested_card['id']})
-        relevant_unallocated = set()
-        for row in financial['unallocated_legacy']:
-            aliases = customer_context['name_to_ids'].get(row['customer'], set())
-            if ((customer_ids and customer_ids.intersection(aliases))
-                    or (not customer_ids and row['customer'] == customer)):
-                relevant_unallocated.add(row['id'])
-        unallocated_legacy = [legacy[r['id']] for r in financial['unallocated_legacy']
-                              if r['id'] in relevant_unallocated]
-    return render_template('customer_statement.html',customer=display_customer,groups=groups,
-        financial_warnings=financial_warnings,exception_history=exception_history,
-        unallocated_legacy=unallocated_legacy)
+    report = build_customer_statement(
+        customer, db=db, calculate_financial_snapshot=calculate_financial_snapshot,
+        customer_identity_context=customer_identity_context,
+        resolve_customer_name=resolve_customer_name,
+        resolve_customer_identity=resolve_customer_identity,
+        customer_display=customer_display, _business_date=_business_date)
+    return render_template('customer_statement.html', **report)
 
 
 @app.route('/moliya-hisobotlar')
@@ -5417,71 +3445,6 @@ def cashflow_test_page():
                            })
 
 
-def cash_receipt_totals(con, day, custodian='all'):
-    # payments is the legacy accountant receipt ledger; a named recipient is not inferred.
-    # Cancellation is not a cash refund. Internal transfers only change custody.
-    from decimal import Decimal
-    if custodian not in ('all','accountant','workers'):
-        raise ValueError('Kassa turi noto‘g‘ri.')
-    zero = Decimal('0')
-    result = {key: zero for key in ('initial','sales','legacy','linked','expenses','additions','direct','undated','unassigned','transfers')}
-    result['channels'] = {method: zero for method in PAYMENT_METHODS}
-    events = con.execute("""SELECT date,paid amount,'sales' kind,payment_method,0 direct,
-            (SELECT role FROM users
-             WHERE id=COALESCE(sales.initial_payment_recipient_id,sales.user_id)) owner
-            FROM sales WHERE paid<>0
-        UNION ALL SELECT date,amount,'legacy','','0','buxgalter' FROM payments
-        UNION ALL SELECT r.date,r.amount,'linked',r.payment_method,
-            EXISTS(SELECT 1 FROM accountant_worker_receipts a WHERE a.receipt_id=r.id),'' FROM worker_receipts r
-        UNION ALL SELECT r.date,r.amount,'linked',r.payment_method,
-            CASE WHEN r.received_by='accountant' THEN 1 ELSE 0 END,
-            (SELECT role FROM users WHERE id=r.receiver_id) FROM opening_debt_receipts r
-        UNION ALL SELECT date,amount,'expenses','',0,(SELECT role FROM users WHERE id=expenses.user_id) FROM expenses
-        UNION ALL SELECT payment_date,amount,'expenses',payment_method,0,'buxgalter'
-            FROM wheat_purchase_payments
-        UNION ALL SELECT date,amount,'additions',payment_method,0,'buxgalter'
-            FROM accountant_cash_additions
-        UNION ALL SELECT decided_at,amount,'transfers',payment_method,0,'buxgalter'
-            FROM worker_transfers WHERE status='approved'""")
-    for row in events:
-        kind = row['kind']
-        unknown_owner = False
-        if kind=='transfers' and custodian=='all':
-            continue
-        if custodian!='all':
-            if kind in ('sales','expenses','additions'):
-                if row['owner']=='buxgalter':
-                    if custodian=='workers': continue
-                elif row['owner'] in ('umid','maxmud','ishchi'):
-                    if custodian=='accountant': continue
-                else:
-                    unknown_owner = True
-            elif kind=='legacy' and custodian=='workers':
-                continue
-            elif kind=='linked' and bool(row['direct']) != (custodian=='accountant'):
-                continue
-        amount = Decimal(str(row['amount']))
-        if not amount.is_finite() or amount < zero:
-            raise ValueError('Pul yozuvida yaroqsiz summa mavjud.')
-        event_day = _business_date_key(str(row['date'])[:10])
-        if unknown_owner:
-            if event_day<=day: result['unassigned'] += amount
-            continue
-        delta = -amount if kind=='expenses' or (kind=='transfers' and custodian=='workers') else amount
-        if event_day < day:
-            result['initial'] += delta
-        elif event_day == day:
-            result[kind] += amount
-            if kind=='linked' and row['direct']:
-                result['direct'] += amount
-                method = row['payment_method']
-                result['channels'][method] = result['channels'].get(method,zero) + amount
-    result['payments'] = result['legacy'] + result['linked']
-    transfer_delta = -result['transfers'] if custodian=='workers' else result['transfers']
-    result['balance'] = (
-        result['initial'] + result['sales'] + result['payments']
-        + result['additions'] - result['expenses'] + transfer_delta)
-    return result
 
 
 @app.route('/kassa')

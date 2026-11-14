@@ -1,0 +1,40 @@
+{% extends 'base.html' %}
+{% from '_pagination.html' import render_pagination with context %}
+{% block content %}
+<h1>{{ t('bulk.packaging.title') }}</h1>
+<p><a href="{{ url_for('production_page') }}">{{ t('bulk.production.link') }}</a></p>
+<section class="panel">
+<h2>{{ t('bulk.bunker.balance') }} {{ '%.3f'|format(bunker_kg/1000) }} {{ t('common.ton') }}</h2>
+<p class="muted">{{ t('bulk.packaging.note') }}</p>
+{% if not opening and not period and current_user.role == 'buxgalter' %}
+<h3>{{ t('bulk.opening.title') }}</h3>
+<p class="muted">{{ t('bulk.opening.note') }}</p>
+<form method="post" class="form-grid">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="opening">
+<label>{{ t('bulk.date') }} <input type="date" name="date" required></label>
+<label>{{ t('bulk.opening.amount') }} <input type="number" name="opening_tons" min="0" step="0.001" required></label>
+<label class="wide">{{ t('bulk.note') }} <input name="note" maxlength="500"></label>
+<button type="submit">{{ t('bulk.opening.save') }}</button>
+</form>
+{% endif %}
+{% if active and current_user.role == 'buxgalter' %}
+<h3>{{ t('bulk.packaging.enter') }}</h3>
+<form method="post" class="form-grid">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="operation_token" value="{{ packaging_token() }}">
+<input type="hidden" name="action" value="package">
+<label>{{ t('bulk.date') }} <input type="date" name="date" required></label>
+<label>{{ t('bulk.withdrawn') }} <input type="number" name="withdrawn_tons" min="0.001" step="0.001" required></label>
+<div class="wide"><h3>{{ t('bulk.lines.title') }}</h3><p class="muted">{{ t('bulk.lines.note') }}</p>
+<div id="packaging-lines"><div class="form-grid bag-line"><label>{{ t('bulk.product') }} <select name="bag_product">{% for product in bagged_products %}<option value="{{ product }}">{{ product }}</option>{% endfor %}</select></label><label>{{ t('bulk.bag') }} <select name="bag_kg"><option value="50">50 {{ t('common.kg') }}</option><option value="25">25 {{ t('common.kg') }}</option></select></label><label>{{ t('bulk.count') }} <input type="number" name="bag_count" min="1" step="1" value="1" required></label></div></div>
+<button type="button" id="add-packaging-line">{{ t('bulk.lines.add') }}</button></div>
+<label class="wide">{{ t('bulk.loss.note') }} <input name="note" maxlength="500" placeholder="{{ t('bulk.loss.placeholder') }}"></label>
+<button type="submit">{{ t('bulk.packaging.save') }}</button>
+</form>
+{% elif not active %}
+<p class="muted">{{ t('rop.packaging.inactive') }}</p>
+{% endif %}
+</section>
+<section class="panel"><h2>{{ t('bulk.packaging.history') }}</h2><div style="overflow-x:auto"><table><thead><tr><th>{{ t('bulk.date') }}</th><th>{{ t('bulk.withdrawn.kg') }}</th><th>{{ t('bulk.packaged.kg') }}</th><th>{{ t('rop.packaging.difference') }}</th></tr></thead><tbody>{% for p in packaging %}<tr><td>{{ p.date|business_date }}</td><td>{{ '%.3f'|format(p.withdrawn_kg) }}</td><td>{{ '%.3f'|format(p.packaged_kg) }}</td><td>{{ '%.3f'|format(p.withdrawn_kg - p.packaged_kg) }}</td></tr>{% else %}<tr><td colspan="4">{{ t('bulk.no.packaging') }}</td></tr>{% endfor %}</tbody></table></div>{{ render_pagination(pagination) }}</section>
+<script>(function(){const btn=document.getElementById('add-packaging-line');if(!btn)return;btn.addEventListener('click',function(){const target=document.getElementById('packaging-lines');if(target.querySelectorAll('.bag-line').length>=20)return;const row=target.querySelector('.bag-line').cloneNode(true);row.querySelector('input[name="bag_count"]').value='1';target.appendChild(row);});})();</script>
+{% endblock %}

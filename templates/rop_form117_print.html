@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="uz"><head><meta charset="utf-8"><title>117-shakl · ROP {{ period.id }}</title>
+<style>
+@page { size:A4 landscape; margin:8mm; }
+body {font:7pt Arial,sans-serif;color:#111;margin:0 auto;max-width:281mm}
+table { width:100%;table-layout:fixed;border-collapse:collapse }
+td { padding:0.45mm; vertical-align:middle; text-align:center; overflow-wrap:anywhere; }
+td.line { border:0.2mm solid #333 } td.strong{font-weight:bold}
+td.number{white-space:nowrap;font-variant-numeric:tabular-nums}
+tr {break-inside:avoid} .controls {padding:2mm;font-size:10pt}
+@media print {.controls{display:none} body{font-size:6pt;line-height:1.05} td{padding:0.16mm}}
+</style></head><body>
+<div class="controls"><button onclick="window.print()">Chop etish (A4)</button>
+<a href="{{ url_for('rop_form_document', period_id=period.id, number=117, output='download') }}">Excel</a>
+{% if issue %}<p>{{ issue }}</p>{% endif %}</div>
+<table aria-label="117-shakl">
+<colgroup>{% for width in widths %}<col style="width:{{ width }}%">{% endfor %}</colgroup>
+{% for row in grid %}<tr>{% for value,rs,cs,bold,precision,border in row %}
+<td class="{{ 'line' if border else '' }} {{ 'strong' if bold else '' }} {{ 'number' if value is number else '' }}" {% if rs>1 %}rowspan="{{ rs }}"{% endif %} {% if cs>1 %}colspan="{{ cs }}"{% endif %}>
+{% if value is float %}{{ '%.*f'|format(precision,value) }}{% elif value is not none %}{{ value }}{% endif %}</td>
+{% endfor %}</tr>{% endfor %}
+</table>
+</body></html>

@@ -1,6 +1,17 @@
 {% extends 'base.html' %}{% from '_pagination.html' import render_pagination with context %}
 {% macro amount(value) %}{{ '{:,.2f}'.format(value).replace(',', ' ') }}{% endmacro %}
 {% block content %}
+<style>
+.debtor-edit-name { display:inline-flex;align-items:center;gap:.4rem;flex-wrap:wrap }
+.legacy-pencil { display:inline-grid;place-items:center;min-width:1.9rem;min-height:1.9rem;border-radius:.35rem;
+    background:#15803d;color:white;text-decoration:none;font-weight:bold;cursor:pointer; }
+.legacy-picker { display:inline-block;position:relative; }
+.legacy-picker summary { list-style:none; }
+.legacy-picker summary::-webkit-details-marker { display:none; }
+.legacy-picker-list { position:absolute;z-index:3;background:white;border:1px solid #aaa;border-radius:.4rem;
+    min-width:9rem;padding:.5rem;box-shadow:0 .25rem .8rem #0002; }
+.legacy-picker-list a { display:block;padding:.3rem; }
+</style>
 <h1>{{ t('debts.title') }}</h1>
 {% if session.get('role') != 'rahbar' %}<p><a class="btn" href="{{ url_for('opening_debt_page') }}">{{ t('debts.opening_entry') }}</a></p>{% else %}<p>{{ t('debts.manager_readonly') }}</p><p><a class="btn" href="{{ url_for('unified_excel_report') }}">📥 {{ t('nav.unified_excel') }}</a></p>{% endif %}
 <p>{{ t('debts.period_note') }}</p>
@@ -10,7 +21,21 @@
 {% for key,title_key in [('ontime','debts.ontime'),('soon','debts.due_soon'),('late','debts.overdue')] %}
 <section class="panel"><h2>{{ t(title_key) }} ({{ group_counts[key] }})</h2>
 {% if groups[key] %}<table><thead><tr><th>{{ t('common.customer') }}</th><th>{{ t('debts.phone_entered') }}</th><th>{{ t('debts.active_sale_amount') }}</th><th>{{ t('debts.opening_debt') }}</th><th>{{ t('debts.active_obligation') }}</th><th>{{ t('debts.initial_payment') }}</th><th>{{ t('debts.followup_payments') }}</th><th>{{ t('debts.old_payment_fifo') }}</th><th>{{ t('debts.received') }}</th><th>{{ t('debts.remaining') }}</th><th>{{ t('debts.due_date') }}</th><th>{{ t('debts.days_left') }}</th>{% if session.get('role') != 'rahbar' %}<th>{{ t('common.action') }}</th>{% endif %}</tr></thead><tbody>
-{% for r in groups[key] %}<tr class="debtor-row" data-customer="{{ r.customer }}" data-phone="{{ r.phone }}"><td><a href="{{ url_for('customer_statement',customer=r.customer) }}">{{ r.customer }}</a></td><td>{% for phone in r.phones %}{{ phone or t('debts.not_specified') }}{% if not loop.last %}; {% endif %}{% endfor %}</td><td>{{ amount(r.sales_revenue) }}</td><td>{{ amount(r.opening_debt) }}</td><td>{{ amount(r.total) }}</td><td>{{ amount(r.initial_paid) }}</td><td>{{ amount(r.linked_paid) }}</td><td>{{ amount(r.legacy_applied) }}</td><td>{{ amount(r.paid) }}{% if r.excess %}<br>{{ t('debts.excess_amount') }} {{ amount(r.excess) }}{% endif %}</td><td class="debtor-balance">{{ amount(r.debt) }}</td><td>{{ r.due_date|business_date }}</td><td>{% if r.days_left < 0 %}{{ -r.days_left }} {{ t('debts.days_late') }}{% else %}{{ r.days_left }} {{ t('common.day') }}{% endif %}</td>{% if session.get('role') != 'rahbar' %}<td><a class="btn" href="{{ url_for('payments_page',customer=r.customer) }}">💰 {{ t('debts.pay') }}</a></td>{% endif %}</tr>{% endfor %}
+{% for r in groups[key] %}<tr class="debtor-row" data-customer="{{ r.customer }}" data-phone="{{ r.phone }}"><td><span class="debtor-edit-name">
+{% if session.get('role') in ('buxgalter','rahbar') %}
+    {% if r.edit_card_id is not none %}
+    <a class="legacy-pencil" title="Таҳрирлаш" aria-label="Xaridorni tahrirlash"
+       href="{{ url_for('debtor_card_edit',customer_id=r.edit_card_id) }}">✎</a>
+    {% elif r.legacy_opening_ids|length == 1 %}
+    <a class="legacy-pencil" title="Таҳрирлаш" aria-label="Eski qarzni tahrirlash"
+       href="{{ url_for('debtor_legacy_edit',debt_id=r.legacy_opening_ids[0]) }}">✎</a>
+    {% elif r.legacy_opening_ids|length > 1 %}
+    <details class="legacy-picker"><summary class="legacy-pencil" title="Қайси эски қарз ёзуви?" aria-label="Eski qarz yozuvini tanlash">✎</summary>
+       <div class="legacy-picker-list">{% for debt_id in r.legacy_opening_ids %}<a href="{{ url_for('debtor_legacy_edit',debt_id=debt_id) }}">Eski qarz #{{ debt_id }}</a>{% endfor %}</div>
+    </details>
+    {% endif %}
+{% endif %}
+<a href="{{ url_for('customer_statement',customer=r.customer) }}">{{ r.customer }}</a></span></td><td>{% for phone in r.phones %}{{ phone or t('debts.not_specified') }}{% if not loop.last %}; {% endif %}{% endfor %}</td><td>{{ amount(r.sales_revenue) }}</td><td>{{ amount(r.opening_debt) }}</td><td>{{ amount(r.total) }}</td><td>{{ amount(r.initial_paid) }}</td><td>{{ amount(r.linked_paid) }}</td><td>{{ amount(r.legacy_applied) }}</td><td>{{ amount(r.paid) }}{% if r.excess %}<br>{{ t('debts.excess_amount') }} {{ amount(r.excess) }}{% endif %}</td><td class="debtor-balance">{{ amount(r.debt) }}</td><td>{{ r.due_date|business_date }}</td><td>{% if r.days_left < 0 %}{{ -r.days_left }} {{ t('debts.days_late') }}{% else %}{{ r.days_left }} {{ t('common.day') }}{% endif %}</td>{% if session.get('role') != 'rahbar' %}<td><a class="btn" href="{{ url_for('payments_page',customer=r.customer) }}">💰 {{ t('debts.pay') }}</a></td>{% endif %}</tr>{% endfor %}
 </tbody></table>{% else %}<p>{{ t('debts.no_customers') }}</p>{% endif %}{{ render_pagination(group_pagination[key]) }}</section>{% endfor %}
 <p>{{ t('debts.no_zero_balance') }}</p>
 {% if financial_totals.excess %}<p>{{ t('debts.excess_total') }} {{ amount(financial_totals.excess) }} {{ t('common.som') }}. {{ t('debts.not_deducted') }}</p>{% endif %}

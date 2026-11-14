@@ -30,6 +30,13 @@
 <section class="wd-card">
 <h2>💳 {{ t('cash.worker.nav.debt_payment') }}</h2>
 <p class="wd-intro">{{ t('employee.payment_intro') }}</p>
+<form method="get" action="{{ url_for('worker_debts') }}" style="display:flex;gap:8px;flex-wrap:wrap;margin:12px 0">
+<label for="debt-search" class="sr-only">Xaridor yoki telefon qidiruvi</label>
+<input id="debt-search" name="q" value="{{ request.args.get('q','')|e }}" placeholder="Xaridor yoki telefon (kamida 2 belgi)" autocomplete="off" style="min-width:250px;flex:1;padding:11px;border:1px solid #b9d4c7;border-radius:9px">
+<button class="wd-pay" type="submit">Qidirish</button>
+<a href="{{ url_for('worker_debts') }}" style="padding:10px">Tozalash</a>
+</form>
+<script>(function(){const input=document.getElementById('debt-search');let timer;input.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>{const v=input.value.trim();if(v.length>=2||v.length===0){const url=new URL(window.location.href);if(v)url.searchParams.set('q',v);else url.searchParams.delete('q');url.searchParams.delete('debt_page');window.location.assign(url.toString());}},450);});})();</script>
 <table class="wd-table"><thead><tr><th>{{ t('common.customer') }}</th><th>{{ t('employee.total_debt') }}</th><th>{{ t('common.action') }}</th></tr></thead><tbody>
 {% for item in debt_groups %}
 <tr><td><strong>{{ item.customer }}</strong><br><small>{{ item.phone }}</small></td>

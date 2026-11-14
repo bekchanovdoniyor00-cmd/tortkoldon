@@ -1,4 +1,4 @@
-{% extends 'base.html' %}{% from '_pagination.html' import render_pagination with context %}{% block content %}<h1>{{ t('sales.title') }}</h1><section class="panel"><form method="post" class="form-grid" autocomplete="off"><input type="hidden" name="operation_token" value="{{ accountant_sale_token() }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+{% extends 'base.html' %}{% from '_pagination.html' import render_pagination with context %}{% block content %}<h1>{{ t('sales.title') }}</h1><section class="panel customer-search-panel"><form method="post" class="form-grid" autocomplete="off"><input type="hidden" name="operation_token" value="{{ accountant_sale_token() }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>{{ t('common.date') }}<input type="date" name="date"></label>
 <div class="customer-field"><label for="customer-name">{{ t('sales.customer_name') }}</label><input id="customer-name" name="customer" required autocomplete="off"><div id="customer-suggestions" class="suggestions" hidden></div></div>
 <label>{{ t('sales.phone_required') }}<input id="customer-phone" name="customer_phone" type="tel" required></label>
@@ -16,9 +16,9 @@
 </form></section>
 <section class="panel"><h2>{{ t('sales.stock_header') }}</h2><div class="stock-chips">{% for p, qty in stocks.items() %}<span>{{ p }}: <b>{{ '%.2f'|format(qty) }} {{ t('common.kg') }}</b>{% if p in bagged_stocks %}<br>25 {{ t('common.kg') }}: {{ bagged_stocks[p][25] }} {{ t('common.bag') }} · 50 {{ t('common.kg') }}: {{ bagged_stocks[p][50] }} {{ t('common.bag') }}{% endif %}</span>{% endfor %}</div><p class="muted">{{ t('sales.stock_note') }}</p></section>
 <section class="panel"><h2>{{ t('sales.history') }}</h2><div class="table-wrap"><table><tr><th>{{ t('common.date') }}</th><th>{{ t('common.customer') }}</th><th>{{ t('common.product') }}</th><th>{{ t('sales.sale_method') }}</th><th>{{ t('sales.total_kg') }}</th><th>{{ t('sales.price') }}</th><th>{{ t('sales.paid') }}</th><th>{{ t('common.action') }}</th></tr>{% for r in rows %}<tr><td>{{ r.date|business_date }}</td><td>{{ r.customer }}</td><td>{{ r.product }}</td><td>{% if r.sale_mode=='qop' and r.bag_count %}{{ r.bag_count|int }} × {{ r.bag_kg|int }} {{ t('common.kg') }}{% elif r.sale_mode=='kg' %}{{ t('sales.mode.loose_short') }}{% else %}{{ t('sales.legacy_record') }}{% endif %}</td><td>{{ '%.2f'|format(r.qty_kg) }}</td><td>{{ '{:,.0f}'.format(r.qty_kg*r.price_per_kg).replace(',', ' ') }}</td><td>{{ '{:,.0f}'.format(r.paid).replace(',', ' ') }}</td><td>{% if r.cancelled %}<b style="color:#b33">{{ t('sales.cancelled') }}</b>{% else %}<a href="{{ url_for('edit_sale',sale_id=r.id) }}">{{ t('sales.edit') }}</a>{% if session.get('role')=='buxgalter' %}<form method="post" action="{{ url_for('cancel_sale',sale_id=r.id) }}" style="display:inline" data-cancel-confirm="{{ t('sales.cancel_confirm') }}" onsubmit="return confirm(this.dataset.cancelConfirm)"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input name="reason" required minlength="5" placeholder="{{ t('sales.cancel_reason') }}" style="max-width:155px"><button type="submit">{{ t('sales.cancel') }}</button></form>{% endif %}{% endif %} {% if r.invoice_id %} · <a href="{{ url_for('invoice_print',invoice_id=r.invoice_id) }}" target="_blank">{{ t('sales.invoice_number') }}{{ r.invoice_number }}</a>{% endif %}</td></tr>{% else %}<tr><td colspan="8">{{ t('pagination.total') }} 0 {{ t('pagination.records') }}</td></tr>{% endfor %}</table></div>{{ render_pagination(pagination) }}</section>
-<style>[hidden]{display:none!important}.customer-field{position:relative}.suggestions{position:absolute;top:100%;left:0;right:0;z-index:20;background:white;border:1px solid #ddd;border-radius:8px;max-height:220px;overflow:auto}.suggestion{display:block;width:100%;padding:9px;text-align:left;background:white;color:#222;border:0;border-bottom:1px solid #ddd}.stock-chips{display:flex;flex-wrap:wrap;gap:10px}.stock-chips span{padding:9px 12px;background:#e9f5ec;border-radius:10px}.table-wrap{overflow:auto}</style>
+<style>[hidden]{display:none!important}.customer-search-panel{overflow:visible!important}.customer-field{position:relative;z-index:30}.suggestions{position:absolute;top:100%;left:0;right:0;z-index:20;background:white;border:1px solid #ddd;border-radius:8px;max-height:220px;overflow:auto}.suggestion{display:block;width:100%;padding:9px;text-align:left;background:white;color:#222;border:0;border-bottom:1px solid #ddd}.stock-chips{display:flex;flex-wrap:wrap;gap:10px}.stock-chips span{padding:9px 12px;background:#e9f5ec;border-radius:10px}.table-wrap{overflow:auto}</style>
 <script>
-const options={{ bag_options|tojson }}, loose={{ loose_products|tojson }}, customers={{ customers|tojson }};
+const options={{ bag_options|tojson }}, loose={{ loose_products|tojson }};
 const ui={bagPrice:{{ t('sales.bag_price')|tojson }},kgPrice:{{ t('sales.kg_price')|tojson }},total:{{ t('sales.total')|tojson }},kg:{{ t('common.kg')|tojson }},som:{{ t('common.som')|tojson }},noWorker:{{ t('sales.related_employee_missing')|tojson }}};
 const workerProducts={{ worker_products|tojson }}, saleWorkers={{ sale_workers|tojson }};
 const product=document.getElementById('product'), mode=document.getElementById('sale-mode'), bag=document.getElementById('bag-kg');
@@ -35,6 +35,43 @@ workerRecipient.textContent=workers.length===1?workers[0].username:ui.noWorker;w
 if(workerRecipient.disabled&&recipient.value==='worker')recipient.value=''}
 function calc(){let kg=mode.value==='kg'?Number(qty.value||0):Number(count.value||0)*Number(bag.value||0);let sum=Number(price.value||0)*(mode.value==='kg'?kg:Number(count.value||0));document.getElementById('calculation').textContent=ui.total+' '+kg.toLocaleString('uz-UZ')+' '+ui.kg+' · '+sum.toLocaleString('uz-UZ')+' '+ui.som}
 product.addEventListener('change',()=>{if(!loose.includes(product.value))mode.value='qop';[...mode.options].forEach(o=>{if(o.value==='kg')o.disabled=!loose.includes(product.value)});refresh();refreshPayment()});mode.addEventListener('change',refresh);[count,qty,price,bag].forEach(e=>e.addEventListener('input',calc));paidInput.addEventListener('input',refreshPayment);refresh();refreshPayment();
+// DC_CUSTOMER_AUTOCOMPLETE_20261110: shared, server-side, no card preload.
 const name=document.getElementById('customer-name'),phone=document.getElementById('customer-phone'),list=document.getElementById('customer-suggestions');
-name.addEventListener('input',()=>{let q=name.value.toLowerCase().trim();list.replaceChildren();if(!q){list.hidden=true;return}customers.filter(c=>c.name.toLowerCase().includes(q)).slice(0,8).forEach(c=>{let b=document.createElement('button');b.type='button';b.className='suggestion';b.textContent=c.name+' · '+c.phone;b.onclick=()=>{name.value=c.name;phone.value=c.phone;list.hidden=true};list.append(b)});list.hidden=!list.children.length});
+const customerSearchUrl={{ url_for('worker_customer_search')|tojson }};
+let customerTimer=null,customerSequence=0;
+function hideCustomerList(){list.replaceChildren();list.hidden=true;}
+function findCustomerFrom(input){
+  clearTimeout(customerTimer);
+  const requestId=++customerSequence,q=input.value.trim();
+  hideCustomerList();
+  if(q.length<2 || (/^[+\d\s()-]+$/.test(q) && q.replace(/\D/g,'').length<3))return;
+  customerTimer=setTimeout(async()=>{
+    try{
+      const response=await fetch(customerSearchUrl+'?q='+encodeURIComponent(q),
+        {credentials:'same-origin',cache:'no-store',headers:{'Accept':'application/json'}});
+      if(!response.ok)throw new Error('HTTP '+response.status);
+      const data=await response.json();
+      if(requestId!==customerSequence)return;
+      hideCustomerList();
+      for(const customer of (data.customers||[])){
+        const btn=document.createElement('button');
+        btn.type='button';btn.className='suggestion';
+        btn.textContent=customer.name+(customer.phone?' · '+customer.phone:' · Telefon kiriting');
+        btn.addEventListener('click',()=>{
+          ++customerSequence;clearTimeout(customerTimer);
+          name.value=customer.name;phone.value=customer.phone||'';hideCustomerList();
+        });
+        list.appendChild(btn);
+      }
+      list.hidden=!list.children.length;
+    }catch(err){
+      if(requestId===customerSequence){hideCustomerList();console.warn('Xaridor qidiruvi:',err);}
+    }
+  },250);
+}
+name.addEventListener('input',()=>findCustomerFrom(name));
+phone.addEventListener('input',()=>findCustomerFrom(phone));
+name.addEventListener('keydown',e=>{if(e.key==='Escape')hideCustomerList();});
+phone.addEventListener('keydown',e=>{if(e.key==='Escape')hideCustomerList();});
+document.addEventListener('click',e=>{if(!e.target.closest('.customer-field') && e.target!==phone)hideCustomerList();});
 </script>{% endblock %}

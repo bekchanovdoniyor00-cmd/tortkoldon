@@ -1,8 +1,9 @@
 """Period-based ERP summaries and XLSX export generation."""
 
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 from io import BytesIO
+import json
 import re
 
 from openpyxl import Workbook
@@ -10,6 +11,8 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from cashflow_analytics import calculate_cashflow_analytics
+from rop_service import ROP_ADJUSTMENTS, report_month_start
+from bulk_reporting import append_bulk_sheets, build_bulk_report, bulk_by_production
 from finance_calculations import (
     customer_identity_context,
     resolve_customer_identity,
@@ -61,26 +64,26 @@ def _warn(warnings, key, message, **details):
     warnings.append({'key': key, 'message': message, **details})
 
 
-def _period_rows(con, table, date_column, start, end, parse_date, warnings):
+def _period_rows(con, table, date_column, start, end, parse_date, warnings, *, where='1'):
     exists = con.execute(
         "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table,)
     ).fetchone()
     if not exists:
         return []
     selected = []
-    for row in con.execute(f'SELECT * FROM "{table}"'):
-        values = dict(row)
-        raw_date = values.get(date_column)
+    for row in con.execute(f'SELECT * FROM "{table}" WHERE {where}'):
+        raw_date = row[date_column]
         try:
             day = parse_date(raw_date)[0]
         except (TypeError, ValueError, IndexError):
             _warn(
                 warnings, 'undated_period_record',
                 'Sana noaniq yozuv tanlangan davrga taxminan biriktirilmadi.',
-                table=table, record_id=values.get('id'), date=raw_date,
+                table=table, record_id=row['id'] if 'id' in row.keys() else None, date=raw_date,
             )
             continue
         if start <= day <= end:
+            values = dict(row)
             values['_day'] = day
             selected.append(values)
     return selected
@@ -109,6 +112,11 @@ def build_monthly_report(
     ]
     production_rows = _period_rows(
         con, 'production', 'date', start, end, parse_date, warnings)
+    packaging_rows = _period_rows(
+        con, 'flour_packaging', 'date', start, end, parse_date, warnings)
+    rop_receipts = _period_rows(con, 'rop_receipts', 'day', start, end, parse_date, warnings)
+    approved_rop = _period_rows(con, 'rop_periods', 'stop_day', date.min, date.max, parse_date, warnings,
+                                where='stop_day IS NOT NULL')
     sale_rows = _period_rows(
         con, 'sales', 'date', start, end, parse_date, warnings)
     opening_debt_rows = _period_rows(
@@ -138,10 +146,13 @@ def build_monthly_report(
         parse_date, warnings)
 
     cancellations = {}
+    prior_period_cancellations = {}
     if con.execute(
             "SELECT 1 FROM sqlite_master WHERE type='table' "
             "AND name='sale_cancellations'").fetchone():
-        for row in con.execute('SELECT sale_id,cancelled_at FROM sale_cancellations'):
+        for row in con.execute('''SELECT c.sale_id,c.cancelled_at,s.date AS sale_date,
+            s.product,s.qty_kg,s.sale_mode,s.bag_kg,s.bag_count
+            FROM sale_cancellations c LEFT JOIN sales s ON s.id=c.sale_id'''):
             try:
                 cancellation_day = parse_date(row['cancelled_at'])[0]
             except (TypeError, ValueError, IndexError):
@@ -154,12 +165,25 @@ def build_monthly_report(
                 continue
             if cancellation_day <= end:
                 cancellations[row['sale_id']] = cancellation_day
+            if start <= cancellation_day <= end and row['sale_date'] is not None:
+                try:
+                    sale_day = parse_date(row['sale_date'])[0]
+                except (TypeError, ValueError, IndexError):
+                    _warn(warnings, 'uncertain_stock_reversal_sale_date',
+                          'Asl sotuv sanasi noaniq; davrlararo ombor tiklanishi hisoblanmadi.',
+                          sale_id=row['sale_id'])
+                    continue
+                if sale_day < start:
+                    prior_period_cancellations[row['sale_id']] = (row, sale_day, cancellation_day)
 
     period_sales = [
         row for row in sale_rows
         if row['id'] not in cancellations
     ]
     production_ids = {row['id'] for row in production_rows}
+    rop_production_ids = {row[0] for row in con.execute('SELECT production_id FROM rop_production')}
+    bulk_quantities = bulk_by_production(con)
+    bulk_report = build_bulk_report(con, start, end, parse_date, format_date, warnings)
     period_production_types = {}
     if production_ids:
         for row in con.execute(
@@ -187,17 +211,28 @@ def build_monthly_report(
     product_totals = {
         product: ZERO for product in (*flour_products, *byproducts, 'Un (eski yozuv)')
     }
+    packaging_ids = {row['id'] for row in packaging_rows}
+    packaging_details = {}
+    for row in con.execute('SELECT packaging_id,product,bag_kg,bag_count FROM flour_packaging_lines'):
+        if row['packaging_id'] in packaging_ids and row['product'] in production_bag_counts:
+            product_totals[row['product']] += _money(row['bag_kg'] * row['bag_count'])
+            production_bag_counts[row['product']][row['bag_kg']] += row['bag_count']
+            bags = packaging_details.setdefault(row['packaging_id'], {})
+            bags.setdefault(row['product'], {})[row['bag_kg']] = row['bag_count']
     production_detail = []
-    raw_wheat = cleaned_wheat = ZERO
+    raw_wheat = cleaned_wheat = legacy_cleaned = ZERO
     for row in production_rows:
-        raw = _money(row.get('raw_wheat_kg') or row.get('wheat_kg'))
         cleaned = _money(row.get('wheat_kg'))
-        raw_wheat += raw
+        raw = None if row['id'] in rop_production_ids else _money(row.get('raw_wheat_kg') or cleaned)
+        if raw is not None:
+            raw_wheat += raw
+            legacy_cleaned += cleaned
         cleaned_wheat += cleaned
         types = period_production_types.get(row['id'], {})
         for product, amount in types.items():
             product_totals[product] = product_totals.get(product, ZERO) + amount
-        legacy_flour = max(ZERO, _money(row.get('flour_kg')) - sum(types.values(), ZERO))
+        legacy_flour = max(ZERO, _money(row.get('flour_kg')) - sum(types.values(), ZERO)
+                           - _money(bulk_quantities.get(row['id'])))
         product_totals['Un (eski yozuv)'] += legacy_flour
         for product, column in (
                 ('Kepak', 'bran_kg'), ('Muchka', 'muchka_kg'),
@@ -215,7 +250,7 @@ def build_monthly_report(
             'id': row['id'],
             'raw_wheat_kg': raw,
             'cleaned_wheat_kg': cleaned,
-            'loss_kg': raw - cleaned,
+            'loss_kg': raw - cleaned if raw is not None else None,
             'flour_kg': _money(row.get('flour_kg')),
             'products': {product: types.get(product, ZERO)
                          for product in flour_products},
@@ -231,6 +266,16 @@ def build_monthly_report(
             'bag_50': sum(
                 count for (pid, _product, size), count in bagged_production.items()
                 if pid == row['id'] and size == 50),
+        })
+    for row in packaging_rows:
+        bags = packaging_details.get(row['id'], {})
+        production_detail.append({
+            'date': format_date(row['_day']), 'id': f'Q-{row["id"]}',
+            'raw_wheat_kg': None, 'cleaned_wheat_kg': None, 'loss_kg': None,
+            'legacy_flour_kg': ZERO, 'bran_kg': ZERO, 'muchka_kg': ZERO, 'telashka_kg': ZERO,
+            'products': {product: sum(size * count for size, count in sizes.items())
+                         for product, sizes in bags.items()},
+            'bag_counts': bags,
         })
 
     sale_batch_workers = {}
@@ -285,7 +330,8 @@ def build_monthly_report(
         product: {25: 0, 50: 0} for product in flour_products
     }
     recorded_bagged_sale_ids = set()
-    if period_sales:
+    recorded_reversal_bags = {}
+    if period_sales or prior_period_cancellations:
         period_sale_ids = {row['id'] for row in period_sales}
         if con.execute(
                 "SELECT 1 FROM sqlite_master WHERE type='table' "
@@ -295,6 +341,8 @@ def build_monthly_report(
                     'FROM bagged_sale_deductions'):
                 if row['sale_id'] in period_sale_ids:
                     recorded_bagged_sale_ids.add(row['sale_id'])
+                if row['sale_id'] in prior_period_cancellations:
+                    recorded_reversal_bags[row['sale_id']] = (row['product'], row['bag_kg'], row['bag_count'])
                 if (row['sale_id'] in period_sale_ids
                         and row['product'] in bagged_sale_counts
                         and row['bag_kg'] in (25, 50)):
@@ -478,7 +526,29 @@ def build_monthly_report(
          for row in wheat_rows), ZERO)
     wheat_period_used = sum(
         (_money(row.get('raw_wheat_kg') or row.get('wheat_kg'))
-         for row in production_rows), ZERO)
+         for row in production_rows if row['id'] not in rop_production_ids), ZERO)
+    wheat_period_used += sum((_money(row['qty_kg']) for row in rop_receipts
+                              if row['from_warehouse']), ZERO)
+    approved_losses = {key: ZERO for key in ('rop', 'production', 'packaging')}
+    approved_adjustments = {}
+    for row in approved_rop:
+        reconciliation = json.loads(row['reconciliation'])
+        if not reconciliation.get('documents'):
+            continue
+        stop_day = row['_day']
+        report_month = report_month_start(reconciliation.get('report_month'), stop_day.isoformat())
+        # Keep legacy and same-month approvals on their exact stop date.
+        # An explicitly different reporting month assigns only the approved
+        # adjustment summary to that month, never the underlying movements.
+        report_day = stop_day if report_month == stop_day.replace(day=1) else report_month
+        if not start <= report_day <= end:
+            continue
+        for key, value in reconciliation['losses'].items():
+            approved_losses[key] += _money(value)
+        for key, value in reconciliation.get('rop_adjustments', {}).items():
+            if key in ROP_ADJUSTMENTS:
+                label = ROP_ADJUSTMENTS[key]
+                approved_adjustments[label] = approved_adjustments.get(label, ZERO) + _money(value)
 
     start_snapshot = historical_snapshot(start - timedelta(days=1), warnings)
     end_snapshot = historical_snapshot(end, warnings)
@@ -505,26 +575,69 @@ def build_monthly_report(
         product_bags = opening_bags.setdefault(product, {25: 0, 50: 0})
         product_bags[25] += size25
         product_bags[50] += size50
+    # Closing snapshots already exclude cancelled sales. Explain the resulting
+    # increase without posting stock, inferring a physical return or counting
+    # a sale cancelled within this same period a second time.
+    opening_dates = {}
+    for table in ('opening_product_stocks', 'opening_bagged_product_stocks'):
+        dates = {}
+        for row in _period_rows(con, table, 'stock_date', date.min, end, parse_date, []):
+            dates[row['product']] = row['_day']
+        opening_dates[table] = dates
+    bag_opening_dates = opening_dates['opening_bagged_product_stocks']
+    kg_opening_dates = {**bag_opening_dates, **opening_dates['opening_product_stocks']}
+    reversal_details = []
+    reversed_kg = {}
+    reversed_bags = {}
+    for sale_id, (sale, sale_day, cancellation_day) in prior_period_cancellations.items():
+        product = 'Un (eski yozuv)' if sale['product'] == 'Un' else sale['product']
+        quantity = ZERO
+        if sale_day >= kg_opening_dates.get(product, date.min):
+            quantity = _money(sale['qty_kg'])
+            reversed_kg[product] = reversed_kg.get(product, ZERO) + quantity
+        bag = recorded_reversal_bags.get(sale_id)
+        if bag is None:
+            bag = _explicit_bag_sale(dict(sale), flour_products)
+        bag_size = bag_count = 0
+        if bag:
+            bag_product, size, count = bag
+            if (bag_product in flour_products and size in (25, 50)
+                    and sale_day >= bag_opening_dates.get(bag_product, date.min)):
+                sizes = reversed_bags.setdefault(bag_product, {25: 0, 50: 0})
+                sizes[size] += count
+                bag_size, bag_count = size, count
+        if quantity or bag_count:
+            reversal_details.append({
+                'sale_id': sale_id, 'sale_date': format_date(sale_day),
+                'cancelled_date': format_date(cancellation_day), 'cancelled_day': cancellation_day,
+                'product': product, 'restored_kg': quantity, 'bag_kg': bag_size,
+                'bag_count': bag_count,
+            })
+    reversal_details.sort(key=lambda row: (row['cancelled_day'], row['sale_id']))
+    sold_kg_by_product = {}
+    for row in period_sales:
+        product = 'Un (eski yozuv)' if row['product'] == 'Un' else row['product']
+        sold_kg_by_product[product] = sold_kg_by_product.get(product, ZERO) + _money(row['qty_kg'])
     stock_products = []
     stock_product_names = list(dict.fromkeys(
         [*flour_products, *byproducts, 'Un (eski yozuv)']))
     for product in stock_product_names:
         opening = _money(opening_stocks.get(product, 0))
         produced = _money(product_totals.get(product, 0))
-        sold = sum(
-            (_money(row['qty_kg']) for row in period_sales
-             if ('Un (eski yozuv)' if row.get('product') == 'Un'
-                 else row.get('product')) == product), ZERO)
+        sold = sold_kg_by_product.get(product, ZERO)
         closing = _money(closing_stocks.get(product, 0))
+        restored = reversed_kg.get(product, ZERO)
         bag_open = opening_bags.get(product, {25: 0, 50: 0})
         bag_close = closing_bags.get(product, {25: 0, 50: 0})
         bag_produced = production_bag_counts.get(product, {25: 0, 50: 0})
         bag_sold = bagged_sale_counts.get(product, {25: 0, 50: 0})
+        bag_restored = reversed_bags.get(product, {25: 0, 50: 0})
         stock_products.append({
             'product': product,
             'opening_kg': opening,
             'produced_kg': produced,
             'sold_kg': sold,
+            'cancelled_restore_kg': restored,
             'closing_kg': closing,
             'opening_25': bag_open.get(25, 0),
             'opening_50': bag_open.get(50, 0),
@@ -532,19 +645,22 @@ def build_monthly_report(
             'produced_50': bag_produced.get(50, 0),
             'sold_25': bag_sold.get(25, 0),
             'sold_50': bag_sold.get(50, 0),
+            'cancelled_restore_25': bag_restored[25],
+            'cancelled_restore_50': bag_restored[50],
             'closing_25': bag_close.get(25, 0),
             'closing_50': bag_close.get(50, 0),
         })
-        if abs(opening + produced - sold - closing) > Decimal('0.01'):
+        difference = opening + produced - sold + restored - closing
+        if abs(difference) > Decimal('0.01'):
             _warn(
                 warnings, 'stock_reconciliation_difference',
                 'Mahsulot kg qoldig‘i kirim/chiqim bilan to‘liq tenglashmadi; '
                 'tarixiy yoki tasniflanmagan yozuvlarni tekshiring.',
-                product=product, difference=str(opening + produced - sold - closing),
+                product=product, difference=str(difference),
             )
         for size in (25, 50):
             if (bag_open.get(size, 0) + bag_produced.get(size, 0)
-                    - bag_sold.get(size, 0) != bag_close.get(size, 0)):
+                    - bag_sold.get(size, 0) + bag_restored[size] != bag_close.get(size, 0)):
                 _warn(
                     warnings, 'bag_stock_reconciliation_difference',
                     'Qop qoldig‘i kirim/chiqim bilan tenglashmadi; eski kg-only '
@@ -571,9 +687,18 @@ def build_monthly_report(
 
     period_cash = calculate_cashflow_analytics(
         con, start.isoformat(), end.isoformat())
+    # Preserve full dictionary equality and ordering without searching all
+    # cancellation warnings for each sale.
+    warnings_by_code_and_sale = {}
+    for warning in warnings:
+        key = (warning.get('code'), warning.get('sale_id'))
+        warnings_by_code_and_sale.setdefault(key, []).append(warning)
     for warning in period_cash['warnings']:
-        if warning not in warnings:
+        key = (warning.get('code'), warning.get('sale_id'))
+        matching = warnings_by_code_and_sale.setdefault(key, [])
+        if warning not in matching:
             warnings.append(warning)
+            matching.append(warning)
 
     closing_channels = period_cash['cash']['company_channels']
     period_channel_delta = {channel: ZERO for channel in CHANNELS}
@@ -676,20 +801,10 @@ def build_monthly_report(
             'qoldiq mavjud bug‘doy kirimlari va ishlab chiqarish sarfidan '
             'nol boshlang‘ich mezonida hisoblandi.',
         )
-    recorded_opening_products = set()
-    for table in ('opening_product_stocks', 'opening_bagged_product_stocks'):
-        exists = con.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-            (table,)).fetchone()
-        if not exists:
-            continue
-        for row in con.execute(f'SELECT product,stock_date FROM "{table}"'):
-            try:
-                opening_day = parse_date(row['stock_date'])[0]
-            except (TypeError, ValueError, IndexError):
-                continue
-            if opening_day <= start:
-                recorded_opening_products.add(row['product'])
+    recorded_opening_products = {
+        product for dates in opening_dates.values()
+        for product, opening_day in dates.items() if opening_day <= start
+    }
     missing_opening_products = set((*flour_products, *byproducts)) - recorded_opening_products
     if missing_opening_products:
         _warn(
@@ -800,14 +915,17 @@ def build_monthly_report(
         'production': {
             'raw_wheat_kg': raw_wheat,
             'cleaned_wheat_kg': cleaned_wheat,
-            'loss_kg': raw_wheat - cleaned_wheat,
-            'loss_percent': (raw_wheat - cleaned_wheat) * 100 / raw_wheat
+            'loss_kg': raw_wheat - legacy_cleaned,
+            'loss_percent': (raw_wheat - legacy_cleaned) * 100 / raw_wheat
             if raw_wheat else ZERO,
             'products': product_totals,
             'bag_counts': production_bag_counts,
             'rows': production_detail,
+            'approved_rop_losses': approved_losses,
+            'approved_rop_adjustments': approved_adjustments,
         },
-        'inventory': {'products': stock_products},
+        'bunker': bulk_report,
+        'inventory': {'products': stock_products, 'cancellation_restorations': reversal_details},
         'sales': {
             'qty_kg': sale_qty,
             'amount': total_sales_amount,
@@ -913,15 +1031,18 @@ def _sheet_header(ws, title, subtitle, headers):
 
 
 def _append_rows(ws, rows, number_columns=()):
-    for values in rows:
+    text_alignment = Alignment(vertical='top', wrap_text=True)
+    number_alignment = Alignment(vertical='top', wrap_text=False)
+    number_columns = set(number_columns)
+    for row_index, values in enumerate(rows, ws.max_row + 1):
         ws.append(values)
         for index, value in enumerate(values, 1):
-            cell = ws.cell(ws.max_row, index)
+            cell = ws.cell(row_index, index)
             if isinstance(value, str):
                 cell.data_type = 's'
             if index in number_columns and isinstance(value, (int, float, Decimal)):
                 cell.number_format = '#,##0.00;[Red]-#,##0.00;0'
-            cell.alignment = Alignment(vertical='top', wrap_text=isinstance(value, str))
+            cell.alignment = text_alignment if isinstance(value, str) else number_alignment
 
 
 def _finish_sheet(ws, widths):
@@ -942,9 +1063,12 @@ def build_monthly_workbook(report):
     headers = ('Bo‘lim', 'Ko‘rsatkich', 'Qiymat', 'Birlik', 'Izoh')
     _sheet_header(ws, 'Oylik umumiy natijalar', subtitle, headers)
     summary_rows = [
-        ('Ishlab chiqarish', 'Qayta ishlangan bug‘doy', production['raw_wheat_kg'], 'kg', ''),
+        ('Ishlab chiqarish', 'Eski yozuvlardagi xom bug‘doy', production['raw_wheat_kg'], 'kg', ''),
         ('Ishlab chiqarish', 'Tozalangan bug‘doy', production['cleaned_wheat_kg'], 'kg', ''),
         ('Ishlab chiqarish', 'Kamayish', production['loss_kg'], 'kg', f"{production['loss_percent']:.2f}%"),
+        ('Yagona zachiska', 'Tasdiqlangan ROP yo‘qotishi', production['approved_rop_losses']['rop'], 'kg', ''),
+        ('Yagona zachiska', 'Tasdiqlangan ishlab chiqarish farqi', production['approved_rop_losses']['production'], 'kg', ''),
+        ('Yagona zachiska', 'Tasdiqlangan qoplash yo‘qotishi', production['approved_rop_losses']['packaging'], 'kg', ''),
         ('Sotuv', 'Jami sotuv miqdori', report['sales']['qty_kg'], 'kg', ''),
         ('Sotuv', 'Sotuv summasi', report['sales']['amount'], 'so‘m', ''),
         ('Sotuv', 'Sotuv paytidagi to‘lov', report['sales']['initial_paid'], 'so‘m', ''),
@@ -994,11 +1118,16 @@ def build_monthly_workbook(report):
             '',
             warning['message'],
         ))
+    summary_rows.extend(
+        ('Yagona zachiska', label, value, 'kg', 'Tasdiqlangan hujjatli ROP balansi')
+        for label, value in production['approved_rop_adjustments'].items())
     _append_rows(ws, summary_rows, (3,))
     _finish_sheet(ws, (20, 42, 20, 14, 56))
 
     ws = workbook.create_sheet('Ishlab chiqarish')
-    flour_columns = tuple(report['production']['bag_counts'])
+    flour_columns = tuple(product for product in report['production']['bag_counts']
+                          if product != '1-nav un')
+    new_columns = ('1-nav un', '1-nav un 25 kg qop', '1-nav un 50 kg qop')
     bag_columns = tuple(
         f'{product} {size} kg qop'
         for product in flour_columns
@@ -1009,7 +1138,7 @@ def build_monthly_workbook(report):
         'Tozalangan bug‘doy, kg', 'Kamayish, kg',
         *flour_columns, 'Un (eski yozuv), kg',
         'Kepak, kg', 'Muchka, kg', 'Telashka atxod, kg',
-        *bag_columns,
+        *bag_columns, *new_columns,
     )
     _sheet_header(ws, 'Ishlab chiqarish', subtitle, prod_headers)
     prod_rows = []
@@ -1024,6 +1153,8 @@ def build_monthly_workbook(report):
             *(row['bag_counts'].get(product, {}).get(size, 0)
               for product in flour_columns
               for size in (25, 50)),
+            row['products'].get('1-nav un', ZERO),
+            *(row['bag_counts'].get('1-nav un', {}).get(size, 0) for size in (25, 50)),
         ))
     _append_rows(ws, prod_rows, tuple(range(3, len(prod_headers) + 1)))
     _finish_sheet(ws, (14, 18, 19, 21, 17, *(15 for _ in prod_headers[5:])))
@@ -1034,6 +1165,7 @@ def build_monthly_workbook(report):
         'Sotilgan/chiqim kg', 'Davr oxiridagi kg',
         'Boshida 25 kg', 'Boshida 50 kg', 'Kirim 25 kg', 'Kirim 50 kg',
         'Chiqim 25 kg', 'Chiqim 50 kg', 'Oxirida 25 kg', 'Oxirida 50 kg',
+        'Bekor qilishdan tiklangan kg', 'Tiklangan 25 kg qop', 'Tiklangan 50 kg qop',
     )
     _sheet_header(ws, 'Ombor qoldiqlari', subtitle, stock_headers)
     _append_rows(ws, [(
@@ -1041,8 +1173,20 @@ def build_monthly_workbook(report):
         row['closing_kg'], row['opening_25'], row['opening_50'],
         row['produced_25'], row['produced_50'], row['sold_25'],
         row['sold_50'], row['closing_25'], row['closing_50'],
-    ) for row in report['inventory']['products']], tuple(range(2, 14)))
-    _finish_sheet(ws, (25, 20, 22, 22, 20, *(15 for _ in range(8))))
+        row['cancelled_restore_kg'], row['cancelled_restore_25'], row['cancelled_restore_50'],
+    ) for row in report['inventory']['products']], range(2, 17))
+    _finish_sheet(ws, (25, 20, 22, 22, 20, *(15 for _ in range(8)), 25, 21, 21))
+    restorations = report['inventory']['cancellation_restorations']
+    if restorations:
+        ws.append(())
+        ws.append(('Davrlararo bekor qilishdan ombor tiklanishi',))
+        ws.append(('Fizik qaytim hujjati va sanasi ushbu yozuvlarda tasdiqlanmagan.',))
+        ws.append(('Sotuv ID', 'Asl sotuv sanasi', 'Bekor qilish sanasi', 'Mahsulot',
+                   'Tiklangan kg', 'Qop kg', 'Qop soni'))
+        _append_rows(ws, (
+            (row['sale_id'], row['sale_date'], row['cancelled_date'], row['product'],
+             row['restored_kg'], row['bag_kg'] or None, row['bag_count'] or None)
+            for row in restorations), (5,))
 
     ws = workbook.create_sheet('Sotuvlar')
     sales_headers = (
@@ -1089,14 +1233,15 @@ def build_monthly_workbook(report):
         for cell in ws[ws.max_row]:
             cell.font = Font(bold=True, color='FFFFFF')
             cell.fill = PatternFill('solid', fgColor='247A58')
-        for payment in report['debt']['payment_rows']:
+        for row_index, payment in enumerate(report['debt']['payment_rows'], ws.max_row + 1):
             ws.append((
                 payment['date'], payment['type'], payment['customer'],
                 payment['phone'], payment['amount'],
                 f"{payment['recipient']} / {payment['sale_id']} / "
                 f"{payment['channel']} / {payment['note']}",
             ))
-            for cell in ws[ws.max_row]:
+            for column in range(1, 7):
+                cell = ws.cell(row_index, column)
                 if isinstance(cell.value, str):
                     cell.data_type = 's'
         for row_index in range(debt_summary_end + 4, ws.max_row + 1):
@@ -1135,13 +1280,14 @@ def build_monthly_workbook(report):
                 '', account['closing'].get(channel, ZERO), '', '', '',
             ))
     ws.append(('', '', '', '', '', '', '', '', '', ''))
-    for row in report['cash']['events']:
+    for row_index, row in enumerate(report['cash']['events'], ws.max_row + 1):
         ws.append((
             row['date'], row['type'], row['account'], row['counterparty'],
             row['channel'], row['amount'], row['cash_delta'],
             row['source'], row['source_id'], row['note'],
         ))
-        for cell in ws[ws.max_row]:
+        for column in range(1, len(cash_headers) + 1):
+            cell = ws.cell(row_index, column)
             if isinstance(cell.value, str):
                 cell.data_type = 's'
     for row_index in range(5, ws.max_row + 1):
@@ -1194,12 +1340,15 @@ def build_monthly_workbook(report):
             ))
     _finish_sheet(ws, (14, 13, 25, 16, 14, 17, 18, 23, 26, 16, 20, 20))
 
-    for sheet in workbook.worksheets:
+    # The first four sheets write variable text through _append_rows, which
+    # already stores it as text. The remaining sheets also use direct appends.
+    for sheet in workbook.worksheets[4:]:
         for row in sheet.iter_rows(min_row=5):
             for cell in row:
                 if isinstance(cell.value, str):
                     cell.data_type = 's'
     output = BytesIO()
+    append_bulk_sheets(workbook, report['bunker'])
     workbook.save(output)
     output.seek(0)
     return output

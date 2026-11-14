@@ -1,0 +1,16 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>Bug‘doy xaridi — tavsifni tahrirlash</h1>
+<section class="panel">
+  <p class="muted">Xarid #{{ receipt.id }} · {{ receipt.date|business_date }} · {{ receipt.purchase_method }}</p>
+  <p class="muted">Sof miqdor: {{ '%.3f'|format(receipt.net/1000) }} t · Narx: {{ '%.2f'|format(receipt.price_per_kg) }} so‘m/kg</p>
+  <p><strong>Ushbu bosqichda faqat yetkazuvchi va izoh o‘zgaradi.</strong> Sana, og‘irlik, narx va bank/naqd to‘lov o‘zgartirilmaydi.</p>
+  <form method="post" class="form-grid">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="edit_token" value="{{ edit_token }}">
+    <label>Yetkazuvchi<input name="supplier" maxlength="200" value="{{ receipt.supplier or '' }}"></label>
+    <label class="wide">Izoh<input name="note" maxlength="500" value="{{ receipt.note or '' }}"></label>
+    <div class="wide"><button type="submit">Tavsifni saqlash</button> <a href="{{ url_for('wheat') }}">Bekor qilish</a></div>
+  </form>
+</section>
+{% endblock %}
