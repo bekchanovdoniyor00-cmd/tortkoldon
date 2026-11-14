@@ -1,0 +1,17 @@
+{% extends 'base.html' %}{% block content %}
+<section class="panel">
+<h1>{% if edit_type == 'legacy' %}Eski qarz #{{ target.id }}{% else %}Xaridor kartasi #{{ target.id }}{% endif %} — tahrirlash</h1>
+<p>Faqat ism va telefon tuzatiladi. Qarz summasi, xodim, sana va to‘lovlar o‘zgartirilmaydi.</p>
+<form method="post" class="form-grid">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="operation_token" value="{{ write_operation_token(edit_type + '_identity_edit', target_id=target.id, digest=digest) }}">
+<input type="hidden" name="target_id" value="{{ target.id }}">
+<label>Ism<input name="customer" value="{{ target.customer if edit_type == 'legacy' else target.name }}" required maxlength="120"></label>
+<label>Telefon<input name="customer_phone" type="tel" value="{{ target.customer_phone if edit_type == 'legacy' else target.phone }}" required maxlength="40"></label>
+{% if edit_type == 'legacy' %}
+<label class="form-check"><input type="checkbox" name="confirm_existing_card" value="yes"> Agar yangi telefon avvalgi sotuvdagi mavjud xaridor kartasiga tegishli bo‘lsa, shu ikkala yozuv aynan bir odamga tegishli ekanini tasdiqlayman.</label>
+<p><small>Faqat ism bir xil bo‘lsa va shu raqam bilan sotuv mavjud bo‘lsa ruxsat beriladi. Jami qarz, to‘lov va xodimlar bo‘yicha hisob o‘zgarmasligi tekshiriladi.</small></p>
+{% endif %}
+<button type="submit">Saqlash</button><a class="btn" href="{{ url_for('debtors_page') }}">Bekor qilish</a>
+</form>
+</section>{% endblock %}

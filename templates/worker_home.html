@@ -13,7 +13,6 @@
     <nav class="worker-dashboard-nav" aria-label="{{ t('employee.sections') }}">
         <a class="worker-dashboard-nav-link worker-dashboard-nav-current" href="{{ url_for('worker_sales') }}" aria-current="page"><span aria-hidden="true">⌂</span> {{ t('cash.worker.nav.home') }}</a>
         <a class="worker-dashboard-nav-link" href="{{ url_for('worker_sale_form') }}"><span aria-hidden="true">＋</span> {{ t('cash.worker.nav.new_sale') }}</a>
-        {% if current_user.role == 'umid' %}<a class="worker-dashboard-nav-link" href="{{ url_for('production_page') }}"><span aria-hidden="true">⚙</span> {{ t('common.production_role') }}</a>{% endif %}
         <a class="worker-dashboard-nav-link" href="{{ url_for('worker_debts') }}"><span aria-hidden="true">↻</span> {{ t('cash.worker.nav.debt_payment') }}</a>
         <a class="worker-dashboard-nav-link" href="{{ url_for('worker_archive') }}"><span aria-hidden="true">▤</span> {{ t('cash.worker.nav.archive') }}</a>
         <a class="worker-dashboard-nav-link" href="{{ url_for('worker_customers_page') }}"><span aria-hidden="true">♧</span> {{ t('cash.worker.nav.customers') }}</a>
@@ -70,7 +69,6 @@
                 <a class="worker-dashboard-action" href="{{ url_for('worker_customers_page') }}"><span class="worker-dashboard-action-icon" aria-hidden="true">♧</span><span><strong>{{ t('cash.worker.nav.customers') }}</strong><small>{{ t('employee.customer_list') }}</small></span><span class="worker-dashboard-action-arrow" aria-hidden="true">→</span></a>
                 <a class="worker-dashboard-action" href="{{ url_for('worker_cash_page') }}"><span class="worker-dashboard-action-icon" aria-hidden="true">₊</span><span><strong>{{ t('cash.worker.nav.cash') }}</strong><small>{{ t('employee.balance_movements') }}</small></span><span class="worker-dashboard-action-arrow" aria-hidden="true">→</span></a>
                 <a class="worker-dashboard-action" href="{{ url_for('worker_archive') }}"><span class="worker-dashboard-action-icon" aria-hidden="true">▤</span><span><strong>{{ t('cash.worker.nav.archive') }}</strong><small>{{ t('employee.view_previous_sales') }}</small></span><span class="worker-dashboard-action-arrow" aria-hidden="true">→</span></a>
-                {% if current_user.role == 'umid' %}<a class="worker-dashboard-action" href="{{ url_for('production_page') }}"><span class="worker-dashboard-action-icon" aria-hidden="true">⚙</span><span><strong>{{ t('common.production_role') }}</strong><small>{{ t('employee.production_section') }}</small></span><span class="worker-dashboard-action-arrow" aria-hidden="true">→</span></a>{% endif %}
             </div>
         </section>
     </div>

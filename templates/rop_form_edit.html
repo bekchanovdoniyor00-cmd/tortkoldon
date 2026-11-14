@@ -1,0 +1,52 @@
+{% extends 'base.html' %}
+{% block content %}
+<h1>{{ number }}-shakl · ROP № {{ period.id }}</h1>
+<p><a href="{{ url_for('production_page') }}">Ishlab chiqarish</a> ·
+<a href="{{ url_for('rop_form_document', period_id=period.id, number=34 if number == 117 else 117) }}">{{ 34 if number == 117 else 117 }}-shakl</a> ·
+<a href="{{ url_for('rop_form_document', period_id=period.id, number=number, output='print') }}">A4 chop etish</a> ·
+<a href="{{ url_for('rop_form_document', period_id=period.id, number=number, output='download') }}">{{ 'Word' if number == 34 else 'Excel' }} yuklash</a></p>
+<section class="panel">
+<p><strong>{{ status }}</strong>{% if not editable %} · Faqat o‘qish{% endif %}</p>
+{% if issue %}<p>{{ issue }}</p>{% endif %}
+{% if number == 117 %}
+<p>Hisob asosi · {{ '34-shakl' if linked34 else 'ERP tozalangan bug‘doy tortimi (34-shakl hali saqlanmagan)' }} · {{ basis if basis is not none else '—' }} kg.</p>
+<p>Namlanish manfiy, qurish musbat kg. Qo‘lda yozilgan istisnolar manbasi bilan saqlanadi.</p>
+{% else %}
+<p>ERP tozalangan bug‘doy tortimi · {{ measured if measured is not none else '—' }} kg.
+Nakladnoylardagi donli chiqindi · {{ ledger if ledger is not none else '—' }} kg.</p>
+<p>Nakladnoy miqdori chiqindi jadvalidagi toifalar ichida ko‘rsatiladi. Amal qilmaydigan og‘irlik qatoriga 0 yozing.</p>
+{% if ledger_rows %}<details><summary>Nakladnoylar</summary><table>
+<tr><th>Sana</th><th>Raqam</th><th>kg</th></tr>
+{% for row in ledger_rows %}<tr><td>{{ row.day|business_date }}</td><td>{{ row.document_ref }}</td><td>{{ row.qty_kg }}</td></tr>{% endfor %}
+</table></details>{% endif %}
+{% endif %}
+{% if editable %}<form method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="revision" value="{{ revision }}">
+{% endif %}
+{% for title, group in groups %}
+<details {% if loop.first %}open{% endif %}>
+<summary>{{ title }}</summary>
+<div class="form-grid">
+{% for key,label,kind in group %}
+{% set v = values.get(key, '') %}
+<label>{{ label }}
+{% if editable %}
+{% if kind == 'check' %}
+<input type="checkbox" name="{{ key }}" value="yes" {% if v %}checked{% endif %}>
+{% elif kind in ('kg','percent','signed') %}
+<input type="number" name="{{ key }}" value="{{ v }}" step="0.001" {% if kind != 'signed' %}min="0"{% endif %} {% if kind == 'percent' %}max="100"{% endif %}>
+{% elif kind in ('date','month') %}
+<input type="{{ kind }}" name="{{ key }}" value="{{ v }}">
+{% else %}
+<input type="text" name="{{ key }}" value="{{ v }}" maxlength="250">
+{% endif %}
+{% else %}<span>{{ v if v != '' else '—' }}</span>{% endif %}
+</label>
+{% endfor %}
+</div>
+</details>
+{% endfor %}
+{% if editable %}<button type="submit">Hujjatni saqlash</button></form>{% endif %}
+</section>
+{% endblock %}

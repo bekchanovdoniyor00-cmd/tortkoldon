@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="uz"><head><meta charset="utf-8"><title>34-shakl · ROP {{ data.period_id }}</title>
+<style>
+@page { size: A4 portrait; margin: 12mm; }
+body { font: 10pt Arial,sans-serif; color:#111; margin:0 auto; max-width:186mm; }
+h1,h2 { text-align:center; margin:5mm 0 2mm; } h1{font-size:14pt} h2{font-size:12pt}
+p { margin:2mm 0; } table { width:100%; border-collapse:collapse; table-layout:fixed; margin:3mm 0; }
+th,td { border:1px solid #333; padding:1mm; font-size:8.5pt; overflow-wrap:anywhere; } tr { break-inside:avoid; }
+.stamp {text-align:center;font-weight:bold;border:1px solid;padding:2mm} .approval {text-align:right;font-size:8pt}
+.controls{padding:2mm 0}.sign{display:grid;grid-template-columns:1fr 1fr;gap:2mm;break-inside:avoid}
+@media print {.controls{display:none}}
+</style></head><body>
+{% macro v(key) %}{% set value=data.get(key) %}{% if value is float %}{{ '%.12g'|format(value) }}{% else %}{{ value if value is not none else '________' }}{% endif %}{% endmacro %}
+<div class="controls"><button onclick="window.print()">Chop etish (A4)</button>
+<a href="{{ url_for('rop_form_document', period_id=period.id, number=34, output='download') }}">Word</a></div>
+<p class="stamp">{{ data.status }}</p>
+<p class="approval">DQIM 34-sonli tarmoq shakli<br>2012-yil 28-sentabrdagi 78-i va 57-sonli qo‘shma buyruq</p>
+<p>Tashkilot {{ v('organization') }} · ROP № {{ data.period_id }}</p>
+<h1>Donni quritish va tozalashga farmoyish</h1>
+<p>Ombor / elevator № {{ v('warehouse_no') }} · Mudir {{ v('warehouse_name') }}.</p>
+<p>Dastlabki og‘irlik {{ v('raw_kg') }} kg. Tozalangan don {{ v('destination') }} ombori yoki silosiga joylashtiriladi. Muddat {{ v('deadline') }}.</p>
+<p>Rahbar {{ v('director_name') }} · {{ v('director_signature') }}. Laborant {{ v('lab_name') }} · {{ v('lab_signature') }}.</p>
+<h2>Donni quritish va tozalash to‘g‘risida dalolatnoma</h2>
+<p>{{ v('document_date') }} · № {{ v('document') }}. Bo‘lim {{ v('department') }}.</p>
+<p>Davr {{ v('start_day') }} — {{ v('end_day') }}. Tarozi {{ v('scale') }}. Laboratoriya varaqasi {{ v('lab_report') }}.</p>
+<table><thead>
+<tr><th rowspan="2" style="width:20%">Asosiy mahsulot</th><th rowspan="2">Og‘irlik, kg</th><th rowspan="2">Natura, g/l</th><th rowspan="2">Namlik, %</th><th colspan="3">Aralashmalar, %</th><th colspan="2">Zararlanganlik</th><th rowspan="2">Tahlil №</th></tr>
+<tr><th>Iflos</th><th>Shundan zararli</th><th>Donli</th><th>Nomi</th><th>Soni</th></tr></thead>
+<tbody>{% for prefix,label in (('raw','Tozalashdan oldin'),('clean','Tozalashdan keyin')) %}
+<tr><th>{{ label }}</th>{% for key,_,_ in grain %}<td>{{ v(prefix ~ '_' ~ key) }}</td>{% endfor %}</tr>{% endfor %}</tbody></table>
+<table><thead>
+<tr><th rowspan="2" style="width:29%">Oraliq mahsulot va chiqindi turi</th><th rowspan="2">Og‘irlik, kg</th><th colspan="4">Sifat ko‘rsatkichlari, %</th><th rowspan="2">Jami don (4+5)</th><th rowspan="2">Tahlil №</th></tr>
+<tr><th>Namlik</th><th>Asosiy don</th><th>Donli aralashma</th><th>Iflos aralashma</th></tr></thead>
+<tbody>{% for row,label in waste %}
+<tr><th>{{ label }}</th>{% for key,_,_ in waste_columns %}{% if key != 'analysis' %}<td>{{ v(row ~ '_' ~ key) }}</td>{% endif %}{% endfor %}<td>{{ v(row ~ '_grain_total') }}</td><td>{{ v(row ~ '_analysis') }}</td></tr>
+{% endfor %}<tr><th>Jami</th><td>{{ v('total_waste') }}</td><td colspan="6">Shundan nakladnoy bo‘yicha donli chiqindi {{ v('ledger_kg') }} kg. Hisobiy farq {{ v('balance') }} kg.</td></tr></tbody></table>
+{% if data.cleaning_balance_basis %}<p>Og‘irlik farqi asosi {{ v('cleaning_balance_basis') }} · {{ v('cleaning_balance_adjustment') }} kg.</p>{% endif %}
+<h2>Quritish</h2>
+<p>Davr {{ v('dry_start') }} — {{ v('dry_end') }}. Uskuna va usul {{ v('dry_method') }}.</p>
+<p>Miqdor {{ v('dry_kg') }} kg. Namlik oldin {{ v('dry_before') }}%, tahlil {{ v('dry_before_ref') }}. Keyin {{ v('dry_after') }}%, tahlil {{ v('dry_after_ref') }}. Hujjatdagi kamayish {{ v('dry_difference') }}%.</p>
+<p>Tozalashdan oldingi ombor hisobi {{ v('warehouse_before') }} kg. Rejalashtirilgan ish {{ v('planned_tons') }} t.</p>
+<h2>Tekshiruv va tasdiqlash</h2>
+<div class="sign">{% for key,label in signs %}<div>{{ label }} · {{ v(key ~ '_name') }}<br>Imzo · {{ v(key ~ '_signature') }}</div>{% endfor %}
+<div>Tasdiqlash sanasi · {{ v('approval_date') }}<br>M.O‘. __________</div></div>
+</body></html>

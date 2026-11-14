@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="uz">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>117-shakl asosida zachiska dalolatnomasi loyihasi</title>
+  <style>
+    @page { size: A4 portrait; margin: 12mm; }
+    body { font: 14px Arial, sans-serif; color: #222; background: #eee; margin: 0; }
+    main, .controls { max-width: 185mm; margin: 12px auto; padding: 14px; background: white; }
+    .controls button { background: #197a43; color: white; padding: 8px 16px; border: 0; cursor: pointer; }
+    h1 { font-size: 20px; }
+    h2 { font-size: 16px; margin-top: 1.3em; break-after: avoid; }
+    .draft { border: 2px solid #222; padding: 8px; text-align: center; font-weight: bold; }
+    table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+    th, td { border: 1px solid #555; padding: 5px 7px; text-align: left; overflow-wrap: anywhere; }
+    tr { break-inside: avoid; }
+    @media print { .controls { display: none; } body { background: white; } main { margin: 0; padding: 0; } }
+  </style>
+</head>
+<body>
+{% macro value(v, unit='') %}{{ v ~ unit if v is not none and v != '' else 'Ma’lumot mavjud emas' }}{% endmacro %}
+{% macro kg(v) %}{{ value('%.3f'|format(v), ' kg') if v is not none else value(none) }}{% endmacro %}
+{% macro day(v) %}{{ value(v|business_date if v else none) }}{% endmacro %}
+<div class="controls">
+  <button type="button" onclick="window.print()">Chop etish (A4)</button>
+  <a href="{{ url_for('production_page', stop_day=stop_day if not closed else none, report_month=month if not closed else none) }}">Yagona zachiskaga qaytish</a>
+  <a href="{{ url_for('rop_form_document', period_id=period.id, number=117, output='print') }}">Asl 117-shakl jadvali</a>
+</div>
+<main>
+  <p class="draft">LOYIHA — AMALIY TASDIQ KUTILMOQDA</p>
+  <h1>117-shakl asosida ishlab chiqarish korpusini zachiska qilish dalolatnomasi</h1>
+  <p>ROP davri № {{ period.id }} · Davr boshi {{ day(period.start_day) }}</p>
+  <table>
+    <tr><th>Hisobot oyi</th><td>{{ value(month) }}</td></tr>
+    <tr><th>{{ 'Qayd etilgan to‘xtash sanasi' if closed else 'Ko‘rib chiqish uchun to‘xtash sanasi' }}</th><td>{{ day(stop_day) }}</td></tr>
+    <tr><th>Ma’lumotlar kesimi</th><td>{{ day(cutoff) }}</td></tr>
+    <tr><th>ERPdagi zachiska holati</th><td>{{ 'Tasdiqlangan' if closed else 'Ochiq' }}</td></tr>
+  </table>
+  <h2>Bug‘doy va ROP</h2>
+  <table>
+    <tr><th>ROP boshlang‘ich hisob miqdori</th><td>{{ kg(opening) }}</td></tr>
+    <tr><th>ROPga davr kirimlari</th><td>{{ kg(received) }}</td></tr>
+    <tr><th>Qayta ishlashga berilgan dastlabki xom bug‘doy (XON)</th><td>{{ value(none) }} · XON orqali uzatilgan xom bug‘doy tortilmagan.</td></tr>
+    <tr><th>O‘lchangan tozalangan bug‘doy</th><td>{{ kg(cleaned) }}</td></tr>
+    <tr><th>ROP hisobiy farqi (boshlang‘ich miqdor + kirim − tozalangan bug‘doy)</th><td>{{ kg(difference) }}</td></tr>
+    <tr><th>Hujjatli fizik ROP sanoqi</th><td>{{ kg(physical_rop) }}</td></tr>
+    <tr><th>Fizik sanoq sanasi va hujjati</th><td>{{ day(measurement_day) }} · {{ value(measurement_doc) }}</td></tr>
+  </table>
+  <h2>ROP kirim yozuvlari</h2>
+  <table>
+    <thead><tr><th>Sana</th><th>Manba</th><th>Miqdor</th><th>O‘tkazma hujjati</th></tr></thead>
+    <tbody>
+    {% for receipt in receipts %}
+      <tr><td>{{ day(receipt.day) }}</td><td>{{ 'Bug‘doy ombori' if receipt.from_warehouse else 'Bevosita ROP' }}</td>
+        <td>{{ kg(receipt.qty_kg) }}</td><td>{{ value(receipt.document_ref) }}</td></tr>
+    {% else %}<tr><td colspan="4">{{ value(none) }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  <h2>Mahsulot chiqishi va chiqindi</h2>
+  <table>
+    <tr><th>ERPda qayd etilgan jami mahsulot chiqishi</th><td>{{ kg(production_output) }}</td></tr>
+    {% for product, quantity in products %}<tr><th>{{ product }}</th><td>{{ kg(quantity) }}</td></tr>{% endfor %}
+    <tr><th>Tozalash chiqindisi</th><td>{{ kg(cleaning_waste) }} · {{ value(cleaning_document) }}</td></tr>
+    {% if grain_waste is not none %}
+    <tr><th>Shundan donli chiqindi · 34-shakl nakladnoylari</th><td>{{ kg(grain_waste) }}</td></tr>
+    {% if other_cleaning_waste is not none %}
+    <tr><th>Shundan boshqa tozalash chiqindisi</th><td>{{ kg(other_cleaning_waste) }}{% if documents.get('other_cleaning_waste') %} · {{ documents['other_cleaning_waste'] }}{% endif %}</td></tr>
+    {% endif %}
+    {% endif %}
+    <tr><th>Hujjatli qurish yoki namlanish (ishorali kg)</th><td>{{ kg(moisture_change) }}</td></tr>
+    {% for key, label in loss_fields.items() %}
+    <tr><th>{{ label }} · zachiskada qayd etilgan {{ 'asoslangan farq' if key == 'production' else 'yo‘qotish' }}</th><td>{{ kg(losses.get(key)) }}</td></tr>
+    {% endfor %}
+  </table>
+  {% if yield_report %}
+  <h2>117-shakl · 75% un tortish bo‘yicha chiqish</h2>
+  <p>Hisob asosi {{ kg(yield_report.cleaned_kg) }} tozalangan bug‘doy. Hujjat {{ yield_report.document }}.</p>
+  <table>
+    <thead><tr><th>Chiqish</th><th>Hisobiy % / kg</th><th>Haqiqiy % / kg</th><th>Me’yordan farq, f.p. / kg</th></tr></thead>
+    <tbody>{% for key, row in yield_report.rows.items() %}
+    <tr><th>{{ yield_labels[key] }}</th><td>{{ '%.3f'|format(row.calculated_pct) }} / {{ '%.3f'|format(row.calculated_kg) }}</td>
+      <td>{{ '%.3f'|format(row.actual_pct) }} / {{ '%.3f'|format(row.actual_kg) }}</td>
+      <td>{{ '%.3f'|format(row.difference_pct) }} / {{ '%.3f'|format(row.difference_kg) }}</td></tr>
+    {% endfor %}</tbody>
+  </table>
+  <p>Foiz bandi hisobiydan haqiqiyni ayirish bilan, kilogramm farqi haqiqiydan hisobiy qiymatni ayirish bilan topiladi.</p>
+  {% endif %}
+  <h2>Bunker va qoplash</h2>
+  <table>
+    {% if not closed %}<tr><th>Kesim sanasidagi hisobiy bunker qoldig‘i</th><td>{{ kg(book_bunker) }}</td></tr>{% endif %}
+    <tr><th>Zachiskada qayd etilgan fizik bunker qoldig‘i</th><td>{{ kg(bunker) }}</td></tr>
+    <tr><th>Qoplash uchun bunkerdan olingan</th><td>{{ kg(packaging.withdrawn) }}</td></tr>
+    <tr><th>Qoplangan jami mahsulot</th><td>{{ kg(packaging.packaged) }}</td></tr>
+  </table>
+  <table>
+    <thead><tr><th>Qoplangan mahsulot</th><th>Qop og‘irligi</th><th>Qop soni</th></tr></thead>
+    <tbody>
+    {% for row in bags %}<tr><td>{{ row.product }}</td><td>{{ value(row.bag_kg, ' kg') }}</td><td>{{ value(row.bags) }}</td></tr>
+    {% else %}<tr><td colspan="3">{{ value(none) }}</td></tr>{% endfor %}
+    </tbody>
+  </table>
+  <h2>Zavod hujjatlari va laboratoriya ko‘rsatkichlari</h2>
+  <table>
+    <tr><th>To‘xtash dalolatnomasi</th><td>{{ value(documents.get('stop')) }}</td></tr>
+    <tr><th>Moddiy balans hujjati</th><td>{{ value(documents.get('balance')) }}</td></tr>
+    <tr><th>Namlik hujjati raqami va sanasi</th><td>{{ value(documents.get('moisture')) }} · __________________</td></tr>
+    <tr><th>Laboratoriya bayonnomasi va xomashyo sifati (tozalashdan oldin va keyin)</th><td>{{ value(none) }} · __________________</td></tr>
+    <tr><th>Mahsulot sifati va nostandart mahsulot bo‘yicha birlamchi hujjat</th><td>{{ value(none) }} · __________________</td></tr>
+    <tr><th>Laboratoriya belgilagan bazis va hisobiy mahsulot chiqishi</th><td>{{ value(none) }} · __________________</td></tr>
+    <tr><th>36-shakl daftari raqami va sahifasi</th><td>{{ value(none) }} · __________________</td></tr>
+    <tr><th>36-shakl bo‘yicha miqdor, o‘rtacha tortilgan namlik va aralashma (%)</th><td>{{ value(none) }} · __________________</td></tr>
+  </table>
+  <h2>Komissiya a’zolari va imzolari</h2>
+  <table>
+    {% for role in ('Komissiya raisi', 'Komissiya a’zolari', 'Moddiy javobgar shaxs', 'Korxona rahbari tasdig‘i') %}
+    <tr><th>{{ role }}</th><td>{{ value(none) }} · F.I.Sh. __________________ · Imzo __________</td></tr>
+    {% endfor %}
+  </table>
+</main>
+</body>
+</html>

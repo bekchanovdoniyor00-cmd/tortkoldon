@@ -69,6 +69,8 @@
 {% if session.get('role')=='rahbar' %}
 <a class="{{ 'active' if request.endpoint=='boss_statistics' else '' }}" href="{{ url_for('boss_statistics') }}"><i data-lucide="bar-chart-2"></i> <span>{{ t('nav.statistics') }}</span></a>
 <a class="{{ 'active' if request.endpoint=='warehouses' else '' }}" href="{{ url_for('warehouses') }}"><i data-lucide="warehouse"></i> <span>{{ t('nav.warehouses') }}</span></a>
+<a class="{{ 'active' if request.endpoint=='production_page' else '' }}" href="{{ url_for('production_page') }}"><i data-lucide="factory"></i> <span>{{ t('bulk.menu.production') }}</span></a>
+<a class="{{ 'active' if request.endpoint=='packaging_page' else '' }}" href="{{ url_for('packaging_page') }}"><i data-lucide="package"></i> <span>{{ t('bulk.menu.packaging') }}</span></a>
 <a class="{{ 'active' if request.endpoint=='debtors_page' else '' }}" href="{{ url_for('debtors_page') }}"><i data-lucide="users"></i> <span>{{ t('nav.debtors') }}</span></a>
 <a class="{{ 'active' if request.endpoint=='reports' else '' }}" href="{{ url_for('reports') }}"><i data-lucide="line-chart"></i> <span>{{ t('nav.reports') }}</span></a>
 <a href="{{ url_for('excel_report',type='stocks') }}"><i data-lucide="file-spreadsheet"></i> <span>{{ t('nav.warehouse_excel') }}</span></a>
@@ -77,6 +79,8 @@
 <a class="{{ 'active' if request.endpoint=='dashboard' else '' }}" href="{{ url_for('dashboard') }}"><i data-lucide="layout-dashboard"></i> <span>{{ t('nav.home') }}</span></a>
 <a class="{{ 'active' if request.endpoint=='wheat' else '' }}" href="{{ url_for('wheat') }}"><i data-lucide="wheat"></i> <span>{{ t('nav.wheat') }}</span></a>
 <a class="{{ 'active' if request.endpoint=='warehouses' else '' }}" href="{{ url_for('warehouses') }}"><i data-lucide="warehouse"></i> <span>{{ t('nav.warehouses') }}</span></a>
+<a class="{{ 'active' if request.endpoint=='production_page' else '' }}" href="{{ url_for('production_page') }}"><i data-lucide="factory"></i> <span>{{ t('bulk.menu.production') }}</span></a>
+<a class="{{ 'active' if request.endpoint=='packaging_page' else '' }}" href="{{ url_for('packaging_page') }}"><i data-lucide="package"></i> <span>{{ t('bulk.menu.packaging') }}</span></a>
 <a class="{{ 'active' if request.endpoint in ('sales_page','edit_sale') else '' }}" href="{{ url_for('sales_page') }}"><i data-lucide="shopping-cart"></i> <span>{{ t('nav.sales') }}</span></a>
 <a class="{{ 'active' if request.endpoint in ('invoices_page','invoice_print') else '' }}" href="{{ url_for('invoices_page') }}"><i data-lucide="file-text"></i> <span>{{ t('nav.invoices') }}</span></a>
 <a class="{{ 'active' if request.endpoint in ('debtors_page','opening_debt_page') else '' }}" href="{{ url_for('debtors_page') }}"><i data-lucide="users"></i> <span>{{ t('nav.customer_debts') }}</span></a>

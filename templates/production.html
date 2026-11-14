@@ -1,75 +1,220 @@
 {% extends 'base.html' %}
 {% from '_pagination.html' import render_pagination with context %}
 {% block content %}
-<h1>{{ t('production.title') }}</h1>
-{% if current_user.role == 'umid' %}<p><a href="{{ url_for('worker_sales') }}" style="display:inline-block;padding:10px 15px;background:#08765a;color:white;border-radius:9px;text-decoration:none">{{ t('production.back') }}</a></p>{% endif %}
+<h1>{{ t('rop.production.title') }}</h1>
+<p><a href="{{ url_for('packaging_page') }}">{{ t('bulk.packaging.link') }}</a></p>
 <section class="panel">
-<h2>{{ t('production.wheat_stock') }} {{ '%.3f'|format(stock/1000) }} {{ t('common.ton') }}</h2>
-<p class="muted">{{ t('production.stock_note') }}Sara, Yevro, Zar Bug‘doy {{ t('common.and') }} Robiya{{ t('production.named_bagged_tail') }}Qora un{{ t('production.flour_other_tail') }} {{ t('common.kg') }} hisobida qoladi.</p>
-{% if current_user.role == 'umid' %}
+  <h2>ROPning oxirgi hujjatli fizik sanoqi</h2>
+  {% if measurement %}<p>{{ '%.3f'|format(measurement.qty_kg) }} kg · {{ measurement.day|business_date }} · {{ measurement.document_ref }}</p>
+  {% else %}<p>Fizik qoldiq noma’lum. Joriy davrda hujjatli sanoq kiritilmagan.</p>{% endif %}
+  <p>Bug‘doy ombori · {{ '%.3f'|format(stock) }} kg<br>Un bunkeri · {{ '%.3f'|format(bunker_kg) }} kg</p>
+  {% if active %}
+  <p>Davr boshlandi · {{ period.start_day|business_date }}. Hisobdagi boshlang‘ich miqdor {{ '%.3f'|format(totals.opening) }} kg. Kirim {{ '%.3f'|format(totals.received) }} kg. Tozalangan {{ '%.3f'|format(totals.cleaned) }} kg.</p>
+  <p>Hisobiy farq (boshlang‘ich miqdor + kirim − tozalangan bug‘doy) · {{ '%.3f'|format(totals.calculated_difference) }} kg. Fizik qoldiq alohida sanoq bilan belgilanadi.</p>
+  {% else %}<p>Ochiq ROP davri yo‘q.</p>{% endif %}
+{% if current_user.role == 'buxgalter' %}
+<h3>{{ 'ROPga qo‘shimcha kirim' if active else 'ROP davrini ochish' }}</h3>
 <form method="post" class="form-grid">
-<input type="hidden" name="operation_token" value="{{ production_token() }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>{{ t('common.date') }}<input type="date" name="date"></label>
-<label>{{ t('production.wheat_unit') }}<select name="unit"><option value="tonna">{{ t('common.ton')|capitalize }}</option><option value="kg">{{ t('production.kilogram') }}</option></select></label>
-<label>{{ t('production.raw_wheat') }}<input type="number" name="raw_wheat" min="0.001" step="0.001" required></label>
-<label>{{ t('production.cleaned_wheat') }}<input type="number" name="cleaned_wheat" min="0.001" step="0.001" required></label>
-<div id="bagged-flour-section" class="wide panel" style="margin:0">
-<h3 style="margin:0">{{ t('production.bagged_products') }}</h3>
-<p>{{ t('production.bagged_note') }}</p>
-<div class="bagged-table-wrap"><table class="bagged-production-table"><thead><tr><th>{{ t('common.product') }}</th><th>{{ t('production.bag_count_25') }}</th><th>{{ t('production.bag_count_50') }}</th><th>{{ t('production.total_kg') }}</th></tr></thead><tbody>
-{% for product in bagged_flour_products %}
-<tr data-bagged-product="{{ product }}">
-<th scope="row">{{ product }}</th>
-{% for size in (25,50) %}
-<td><input type="hidden" name="bag_product" value="{{ product }}"><input type="hidden" name="bag_kg" value="{{ size }}"><label class="bag-count-label"><span>{{ size }} {{ t('common.kg') }} {{ t('production.bag_count_label') }}</span><input type="number" name="bag_count" min="0" step="1" value="0" inputmode="numeric" data-bag-size="{{ size }}" aria-label="{{ product }} {{ size }} {{ t('common.kg') }} {{ t('production.bag_count_label') }}"></label></td>
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="action" value="rop_receive">
+<input type="hidden" name="operation_token" value="{{ write_operation_token('rop_receive', period_id=period.id if period else none) }}">
+<label>Sana <input type="date" name="date" max="{{ today }}" required></label>
+<label>ROPga tushgan bug‘doy (kg) <input type="number" name="qty_kg" min="{{ '0.001' if active else '0' }}" step="0.001" required></label>
+<label>Kirim manbasi <select name="source"><option value="direct">Bevosita ROPga</option><option value="warehouse">Bug‘doy omboridan o‘tkazma</option></select></label>
+<label>O‘tkazma hujjati (ombordan o‘tkazishda majburiy) <input name="transfer_document" maxlength="250"></label>
+<label class="wide">Izoh <input name="note" maxlength="500"></label>
+<button type="submit">{{ 'ROP kirimini saqlash' if active else 'Davrni ochish' }}</button>
+</form>
+{% if not active %}<p class="muted">Davr faqat o‘tuvchi bunker uni uchun ochilsa, ROP kirimiga 0 kg kiriting.</p>{% endif %}
+{% if active %}
+<h3>Hujjatli fizik sanoq</h3>
+<form method="post" class="form-grid">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="action" value="rop_measure">
+<input type="hidden" name="operation_token" value="{{ write_operation_token('rop_measure', period_id=period.id) }}">
+<label>Sanoq sanasi <input type="date" name="date" min="{{ period.start_day }}" max="{{ today }}" required></label>
+<label>Fizik ROP sanoqi (kg) <input type="number" name="qty_kg" min="0" step="0.001" required></label>
+<label>Sanoq hujjati raqami yoki havolasi <input name="document_ref" maxlength="250" required></label>
+<button type="submit">Fizik sanoqni saqlash</button>
+</form>
+{% endif %}
+{% endif %}
+{% if receipts %}
+<details><summary>ROP kirimlari (oxirgi 30 ta)</summary>
+<table><tr><th>Sana</th><th>Davr</th><th>Kirim, kg</th><th>Manba</th><th>O‘tkazma hujjati</th><th>Foydalanuvchi</th><th>Izoh</th></tr>
+{% for row in receipts %}<tr><td>{{ row.day|business_date }}</td><td>{{ row.period_id }}</td><td>{{ '%.3f'|format(row.qty_kg) }}</td><td>{{ 'Bug‘doy ombori' if row.from_warehouse else 'Bevosita ROP' }}</td><td>{{ row.document_ref or ('Eski yozuv' if row.from_warehouse else '—') }}</td><td>{{ row.username }}</td><td>{{ row.note }}</td></tr>{% endfor %}
+</table></details>
+{% endif %}
+</section>
+{% if active %}
+<section class="panel">
+<h2>Зерно отход · 34-shakl nakladnoylari</h2>
+<p>Davrdagi donli chiqindi · {{ '%.3f'|format(waste_kg or 0) }} kg. Nakladnoy bo‘lganda qayd etiladi.</p>
+{% macro waste_fields(row=none) %}
+<label>Nakladnoy sanasi <input type="date" name="date" min="{{ period.start_day }}" max="{{ today }}" value="{{ row.day if row else '' }}" required></label>
+<label>Nakladnoy raqami <input name="document_ref" maxlength="250" value="{{ row.document_ref if row else '' }}" required></label>
+<label>Miqdor (kg) <input type="number" name="qty_kg" min="0.001" step="0.001" value="{{ row.qty_kg if row else '' }}" required></label>
+<label>Izoh <input name="note" maxlength="500" value="{{ row.note if row else '' }}"></label>
+{% endmacro %}
+{% if current_user.role == 'buxgalter' %}
+<form method="post" class="form-grid">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="action" value="rop_grain_waste">
+<input type="hidden" name="operation_token" value="{{ write_operation_token('rop_grain_waste', period_id=period.id) }}">
+{{ waste_fields() }}
+<button type="submit">Kirimni saqlash</button>
+</form>
+{% endif %}
+{% for row in waste_receipts %}
+<details>
+<summary>{{ row.day|business_date }} · {{ row.document_ref }} · {{ '%.3f'|format(row.qty_kg) }} kg</summary>
+{% if current_user.role == 'buxgalter' %}
+<form method="post" class="form-grid">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="action" value="rop_grain_waste_edit">
+<input type="hidden" name="operation_token" value="{{ write_operation_token('rop_grain_waste_edit', period_id=period.id, receipt_id=row.id, revision=row.revision) }}">
+{{ waste_fields(row) }}
+<label>Tuzatish sababi <input name="reason" maxlength="500" required></label>
+<button type="submit">Tuzatishni saqlash</button>
+</form>
+{% elif row.note %}<p>{{ row.note }}</p>{% endif %}
+</details>
 {% endfor %}
-<td class="bagged-product-total" aria-live="polite">0 kg</td>
-</tr>
-{% endfor %}
-</tbody><tfoot><tr><th colspan="3">{{ t('production.all_products_total') }}</th><td id="bagged-total" aria-live="polite">0 {{ t('common.kg') }}</td></tr></tfoot></table></div>
-</div>
-<label>Qora un {{ t('production.flour_produced') }}<input type="number" name="flour_4" min="0" step="0.01" value="0" required></label>
-<label>{{ t('production.bran_produced') }}Kepak{{ t('production.byproduct_kg') }}<input type="number" name="bran_kg" min="0" step="0.01" value="0" required></label>
-<label>{{ t('production.bran_produced') }}Muchka{{ t('production.byproduct_kg') }}<input type="number" name="muchka_kg" min="0" step="0.01" value="0" required></label>
-<label>Telashka atxod{{ t('production.byproduct_kg') }}<input type="number" name="telashka_kg" min="0" step="0.01" value="0" required></label>
-<label class="wide">{{ t('common.note') }}<input name="note"></label><button>{{ t('production.save') }}</button>
+</section>
+{% endif %}
+<section class="panel">
+<h2>Kunlik ishlab chiqarish</h2>
+<p class="muted">XON pogruzchik uzatgan xom bug‘doy tortilmaydi. Tozalashdan keyin o‘lchangan miqdorni kiriting. Fizik qoldiq hujjatli sanoqda qayd etiladi.</p>
+{% if active and current_user.role == 'buxgalter' %}
+<form method="post" class="form-grid">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="action" value="rop_production">
+<input type="hidden" name="operation_token" value="{{ write_operation_token('rop_production', period_id=period.id) }}">
+<label>Sana <input type="date" name="date" min="{{ period.start_day }}" max="{{ today }}" required></label>
+<label>{{ t('bulk.wheat.unit') }} <select name="unit"><option value="kg">{{ t('bulk.kilogram') }}</option><option value="tonna">{{ t('bulk.ton') }}</option></select></label>
+<label>{{ t('bulk.cleaned') }} <input type="number" name="cleaned_wheat" min="0.001" step="0.001" required></label>
+<p class="wide muted">O‘lchangan mahsulot miqdorini yozing. Kunlik tafovut davr yakunida zachiskada hujjat bilan asoslanadi.</p>
+<label>{{ t('bulk.incoming') }} <input type="number" name="bulk_flour_tons" min="0" step="0.001" value="0"></label>
+<label>Qora un (kg) <input type="number" name="black_kg" min="0" step="0.001" value="0"></label>
+<label>Kepak (kg) <input type="number" name="bran_kg" min="0" step="0.001" value="0"></label>
+<label>Muchka (kg) <input type="number" name="muchka_kg" min="0" step="0.001" value="0"></label>
+<label>Telashka atxod (kg) <input type="number" name="telashka_kg" min="0" step="0.001" value="0"></label>
+<label class="wide">Izoh <input name="note" maxlength="500"></label>
+<button type="submit">{{ t('bulk.production.save') }}</button>
 </form>
 {% endif %}
 </section>
 <section class="panel">
-<h2>{{ t('production.history') }}</h2>
-<div style="overflow-x:auto"><table><thead><tr><th>{{ t('common.date') }}</th><th>{{ t('production.raw_tons') }}</th><th>{{ t('production.cleaned_tons') }}</th><th>{{ t('production.loss_tons') }}</th><th>{{ t('production.loss_percent') }}</th><th>{{ t('production.flour_kg') }}</th><th>{{ t('production.bags') }}</th><th>{{ t('production.bran_kg') }}</th><th>{{ t('production.muchka_kg') }}</th><th>{{ t('production.telashka_kg') }}</th></tr></thead><tbody>
-{% for r in rows %}{% set raw = r.raw_wheat_kg if r.raw_wheat_kg is not none else r.wheat_kg %}
-<tr><td>{{ r.date|business_date }}</td><td>{{ '%.3f'|format(raw/1000) }}</td><td>{{ '%.3f'|format(r.wheat_kg/1000) }}</td><td>{{ '%.3f'|format((raw-r.wheat_kg)/1000) }}</td><td>{{ '%.2f'|format((raw-r.wheat_kg)*100/raw if raw else 0) }}%</td><td>{{ '%.2f'|format(r.flour_kg) }}</td><td>{% for line in bag_lines.get(r.id,[]) %}{{ line.product }} {{ line.bag_kg }} {{ t('common.kg') }} × {{ line.bag_count }} ({{ line.qty_kg }} {{ t('common.kg') }}){% if not loop.last %}<br>{% endif %}{% else %}{{ t('production.kg_only') }}{% endfor %}</td><td>{{ '%.2f'|format(r.bran_kg) }}</td><td>{{ '%.2f'|format(r.muchka_kg or 0) }}</td><td>{{ '%.2f'|format(r.telashka_kg or 0) }}</td></tr>
-{% else %}<tr><td colspan="10">{{ t('production.no_history') }}</td></tr>{% endfor %}
-</tbody></table></div>
-{{ render_pagination(pagination) }}
+<h2>Yagona zachiska</h2>
+{% if active %}
+<p><a href="{{ url_for('zachiska_print', period_id=period.id, stop_day=stop_day if finished is not none else none, report_month=report_month if finished is not none else none) }}">117-shakl loyihasini ko‘rish va chop etish</a></p>
+<p><a href="{{ url_for('rop_form_document', period_id=period.id, number=34) }}">34-shakl hujjati</a> · <a href="{{ url_for('rop_form_document', period_id=period.id, number=117) }}">117-shakl hujjati</a></p>
+<p>Mahsulot chiqimi · {{ '%.3f'|format(totals.output) }} kg. Ishlab chiqarish tafovuti · {{ '%.3f'|format(totals.production_gap) }} kg. Qoplash tafovuti · {{ '%.3f'|format(totals.packaging_gap) }} kg.</p>
+<form method="get" class="form-grid">
+<label>Hisobot oyi <input type="month" name="report_month" value="{{ report_month or '' }}"></label>
+<label>Zavodning haqiqiy to‘xtash sanasi <input type="date" name="stop_day" min="{{ period.start_day }}" max="{{ today }}" value="{{ stop_day or '' }}" required></label>
+<p class="wide muted">Hisobot oyi tanlanmasa, to‘xtash sanasining oyi olinadi. Fizik balans haqiqiy to‘xtash sanasi bo‘yicha tekshiriladi.</p>
+<button type="submit">Shu sanadagi balansni tekshirish</button>
+</form>
+{% if finished is not none %}
+{% set can_approve = current_user.role == 'buxgalter' %}
+{% if can_approve %}
+<form method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="action" value="rop_approve">
+<input type="hidden" name="date" value="{{ stop_day }}">
+<input type="hidden" name="operation_token" value="{{ write_operation_token('rop_approve', period_id=period.id, stop_day=stop_day, report_month=report_month, form_revisions=form_revisions) }}">
+<input type="hidden" name="report_month" value="{{ report_month }}">
+<div class="form-grid">
+<p class="wide">To‘xtash sanasida ROP bo‘shligi hujjatli 0 kg fizik sanoq bilan qayd etilishi kerak.</p>
+<label>Zavod to‘xtashi hujjati raqami yoki havolasi <input name="stop_document" maxlength="250" required></label>
+<label>Moddiy balans hujjati raqami yoki havolasi <input name="balance_document" maxlength="250" required></label>
+<label class="wide"><input type="checkbox" name="documents_checked" value="yes" required> To‘xtash, ROP bo‘shligi, harakatlar, tozalash chiqindisi, namlik va moddiy balans hujjatlarini tekshirdim.</label>
+<label>Haqiqiy bunker qoldig‘i (kg) <input type="number" name="bunker_kg" min="0" step="0.001" required></label>
+<p class="wide">Davr kirim jurnalida yozilgan miqdorni boshqa harakat sifatida takrorlamang. Namlikdan vazn kamayishi musbat, vazn ortishi manfiy kiritiladi. Nol qiymatni hujjatga tayangan holda kiriting.</p>
+{% for key, label in rop_adjustments.items() %}
+{% if key == 'cleaning_waste' and form34_saved %}
+<p>Tozalash chiqindisi 34-shakl jadvalidan olinadi.</p>
+{% elif key == 'cleaning_waste' and waste_kg is not none %}
+<p>Donli chiqindi · {{ '%.3f'|format(waste_kg) }} kg (ROP nakladnoylaridan)</p>
+<label>Boshqa tozalash chiqindisi (kg) <input type="number" name="other_cleaning_waste" min="0" step="0.001" value="0"></label>
+{% else %}
+<label>{{ label }} (kg) <input type="number" name="{{ key }}" {% if key != 'moisture_loss' %}min="0"{% endif %} step="0.001" required></label>
+{% endif %}
+{% endfor %}
+<label>ROP harakatlari hujjati <input name="movement_document" maxlength="250" required></label>
+{% if form34_saved %}
+<p>Tozalash chiqindisi hujjati 34-shaklda saqlangan.</p>
+{% elif waste_kg is none %}
+<label>Tozalash chiqindisi hujjati <input name="cleaning_document" maxlength="250" required></label>
+{% else %}
+<label>Boshqa tozalash chiqindisi hujjati (miqdor bo‘lsa) <input name="cleaning_document" maxlength="250"></label>
+{% endif %}
+<label>Namlik o‘zgarishi hujjati <input name="moisture_document" maxlength="250" required></label>
+{% for key, label in loss_fields.items() %}
+<label>{{ label }} · {{ 'asoslangan farq (+ kamayish, − ortish)' if key == 'production' else 'asoslangan yo‘qotish' }} (kg) <input type="number" name="loss_{{ key }}" {% if key != 'production' %}min="0"{% endif %} step="0.001" value="0"></label>
+<label>{{ label }} · farq asosi <input name="reason_{{ key }}" maxlength="500"></label>
+{% endfor %}
+<label>Boshqa ROP yo‘qotishi hujjati (miqdor bo‘lsa) <input name="other_loss_document" maxlength="250"></label>
+</div>
+{% if not form117_saved %}
+<details>
+<summary>117-shakl · 75% un tortish bo‘yicha chiqish hisobi</summary>
+<p>Qiymatlar birlamchi hujjatdan olinadi. Hisobni kiritishni boshlasangiz, barcha maydonlarni to‘ldiring. Namlanish manfiy, qurish musbat kg bilan kiritiladi.</p>
+<div class="form-grid">
+{% for key, label in form117_corrections.items() %}
+<label>{{ label }} (%) <input type="number" name="form117_{{ key }}" {% if key != 'f13' %}min="0"{% endif %} step="0.001"></label>
+{% endfor %}
+{% for key, label in form117_outputs.items() %}
+<label>{{ label }} · haqiqiy kg <input type="number" name="form117_{{ key }}" {% if key != 'moisture' %}min="0"{% endif %} step="0.001"></label>
+{% endfor %}
+<label>Hisob va laboratoriya hujjati raqami <input name="form117_document" maxlength="250"></label>
+</div>
+</details>
+{% else %}<p>Chiqish hisobi saqlangan 117-shakldan olinadi.</p>{% endif %}
+{% endif %}
+<h3>{{ stop_day|business_date }} · Tayyor ombor</h3>
+<p>Hisobot oyi · {{ report_month }}</p>
+<div style="overflow-x:auto"><table>
+<tr><th>Mahsulot</th><th>Birlik</th><th>Hisob qoldig‘i</th>{% if can_approve %}<th>Haqiqiy sanoq</th>{% endif %}</tr>
+{% for product, values in finished.items() %}
+{% for unit, value in values.items() %}
+{% set unit_label = 'kg (qop soniga kirmagan)' if unit == 'kg' and values|length > 1 else ('kg' if unit == 'kg' else unit ~ ' kg qop soni') %}
+<tr><td>{{ product }}</td><td>{{ unit_label }}</td><td>{{ value }}</td>
+{% if can_approve %}<td><input aria-label="{{ product }} · {{ unit_label }}" type="number" name="count_{{ product }}_{{ unit }}" min="0" step="{{ '0.001' if unit == 'kg' else '1' }}" required></td>{% endif %}
+</tr>
+{% endfor %}
+{% endfor %}
+</table></div>
+{% if can_approve %}
+<button type="submit">Yagona zachiskani tasdiqlash</button>
+</form>
+{% endif %}
+{% endif %}
+{% endif %}
+{% for row, result in approved %}
+<details><summary>{{ row.start_day|business_date }} — {{ row.stop_day|business_date }} · Tasdiqladi {{ row.username }}</summary>
+<p><a href="{{ url_for('zachiska_print', period_id=row.id) }}">117-shakl loyihasini ko‘rish va chop etish</a></p>
+<p><a href="{{ url_for('rop_form_document', period_id=row.id, number=34) }}">34-shakl hujjati</a> · <a href="{{ url_for('rop_form_document', period_id=row.id, number=117) }}">117-shakl hujjati</a></p>
+<p>Hisobot oyi · {{ result.report_month or row.stop_day[:7] }}. Haqiqiy to‘xtash sanasi · {{ row.stop_day|business_date }}.</p>
+<p>ROP boshida {{ result.opening }} kg · kirim {{ result.received }} kg · tozalangan {{ result.cleaned }} kg.</p>
+{% if result.documents %}
+<p>Fizik sanoq {{ result.physical_rop }} kg · to‘xtash hujjati {{ result.documents.stop }} · ROP bo‘shligi hujjati {{ result.documents.empty }} · balans hujjati {{ result.documents.balance }}.</p>
+{% if result.rop_adjustments %}
+<ul>{% for key, label in rop_adjustments.items() %}<li>{{ label }} · {{ result.rop_adjustments[key] }} kg</li>{% endfor %}</ul>
+<p>Harakatlar · {{ result.documents.other_movements }}. Tozalash chiqindisi · {{ result.documents.cleaning_waste }}. Namlik · {{ result.documents.moisture }}.{% if result.documents.other_loss %} Boshqa yo‘qotish · {{ result.documents.other_loss }}.{% endif %}</p>
+{% else %}<p>Avvalgi tasdiqlash tartibi · chiqindi va namlik alohida qayd etilmagan.</p>{% endif %}
+{% else %}<p>Avvalgi tartibdagi yozuv · qayd etilgan miqdor {{ result.physical_rop }} kg · hujjatli fizik sanoq mavjud emas.</p>{% endif %}
+<p>Mahsulot chiqimi {{ result.output }} kg · bunker qoldig‘i {{ result.bunker_kg }} kg.</p>
+{% for key, label in loss_fields.items() %}<p>{{ label }} {{ 'farqi' if key == 'production' else 'yo‘qotishi' }} · {{ result.losses[key] }} kg{% if result.reasons[key] %} · {{ result.reasons[key] }}{% endif %}</p>{% endfor %}
+<table><tr><th>Mahsulot</th><th>25 kg qop</th><th>50 kg qop</th><th>Qop hisobidan tashqari kg</th></tr>
+{% for product, values in result.finished.items() %}<tr><td>{{ product }}</td><td>{{ values.get('25', '—') }}</td><td>{{ values.get('50', '—') }}</td><td>{{ values.kg }}</td></tr>{% endfor %}
+</table></details>
+{% else %}<p>Tasdiqlangan zachiska hali yo‘q.</p>{% endfor %}
 </section>
-<style>
-#bagged-flour-section .bagged-table-wrap{overflow-x:auto}
-#bagged-flour-section .bagged-production-table{width:100%;border-collapse:collapse}
-#bagged-flour-section .bagged-production-table th,#bagged-flour-section .bagged-production-table td{padding:9px 10px;text-align:left;border-bottom:1px solid #e3ebe5}
-#bagged-flour-section .bagged-production-table tfoot th,#bagged-flour-section .bagged-production-table tfoot td{font-weight:700;border-bottom:0}
-#bagged-flour-section .bag-count-label{display:grid;gap:4px;font-size:12px;color:#52665e}
-#bagged-flour-section .bag-count-label input{width:100%;min-width:90px}
-@media(max-width:700px){
-#bagged-flour-section .bagged-table-wrap{overflow:visible}
-#bagged-flour-section .bagged-production-table,#bagged-flour-section .bagged-production-table tbody{display:block;width:100%}
-#bagged-flour-section .bagged-production-table thead{display:none}
-#bagged-flour-section .bagged-production-table tbody tr{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0;padding:12px;border:1px solid #dce8df;border-radius:10px}
-#bagged-flour-section .bagged-production-table tbody th{grid-column:1/-1;padding:0 0 6px;border:0;font-size:16px}
-#bagged-flour-section .bagged-production-table tbody td{padding:0;border:0}
-#bagged-flour-section .bagged-production-table tbody td:last-child{grid-column:1/-1;padding-top:5px;font-weight:700}
-#bagged-flour-section .bag-count-label input{min-width:0}
-#bagged-flour-section .bagged-production-table tfoot{display:table;width:100%}
-}
-</style>
-<script>
-(()=>{const section=document.getElementById('bagged-flour-section');if(!section)return;const kgLabel={{ t('common.kg')|tojson }};
-const total=document.getElementById('bagged-total');
-function update(){let all=0;section.querySelectorAll('[data-bagged-product]').forEach(row=>{let productTotal=0;row.querySelectorAll('[data-bag-size]').forEach(input=>{const count=Number(input.value||0);productTotal+=Number(input.dataset.bagSize)*count});all+=productTotal;row.querySelector('.bagged-product-total').textContent=productTotal.toLocaleString('uz-UZ')+' '+kgLabel});total.textContent=all.toLocaleString('uz-UZ')+' '+kgLabel}
-section.querySelectorAll('[data-bag-size]').forEach(input=>input.addEventListener('input',update));
-update();
-})();
-</script>
+<section class="panel"><h2>{{ t('bulk.production.history') }}</h2>
+<div style="overflow-x:auto"><table><thead><tr><th>{{ t('bulk.date') }}</th><th>{{ t('bulk.raw.tons') }}</th><th>{{ t('bulk.cleaned.tons') }}</th><th>{{ t('production.loss_tons') }}</th><th>{{ t('production.loss_percent') }}</th><th>{{ t('bulk.flour.total') }}</th><th>{{ t('bulk.legacy.bagging') }}</th><th>Kepak kg</th><th>Muchka kg</th><th>Telashka kg</th><th>Amal</th></tr></thead><tbody>
+{% for r in rows %}{% set raw = r.raw_wheat_kg if r.raw_wheat_kg is not none else r.wheat_kg %}<tr><td>{{ r.date|business_date }}</td><td>{% if r.rop_period_id %}—{% else %}{{ '%.3f'|format((r.raw_wheat_kg if r.raw_wheat_kg is not none else r.wheat_kg)/1000) }}{% endif %}</td><td>{{ '%.3f'|format(r.wheat_kg/1000) }}</td><td>{% if r.rop_period_id %}—{% else %}{{ '%.3f'|format((raw-r.wheat_kg)/1000) }}{% endif %}</td><td>{% if r.rop_period_id %}—{% else %}{{ '%.2f'|format((raw-r.wheat_kg)*100/raw if raw else 0) }}%{% endif %}</td><td>{{ '%.2f'|format(r.flour_kg) }}</td><td>{% for b in bag_lines.get(r.id,[]) %}{{ b.product }} {{ b.bag_kg }}kg × {{ b.bag_count }}{% if not loop.last %}; {% endif %}{% else %}—{% endfor %}</td><td>{{ '%.2f'|format(r.bran_kg) }}</td><td>{{ '%.2f'|format(r.muchka_kg or 0) }}</td><td>{{ '%.2f'|format(r.telashka_kg or 0) }}</td><td>{% if r.rop_period_id %}<a href="{{ url_for('edit_rop_production', production_id=r.id) }}">{% if current_user.role == 'buxgalter' and active and r.rop_period_id == period.id %}Tahrirlash{% else %}Ko‘rish{% endif %}</a>{% else %}—{% endif %}</td></tr>
+{% else %}<tr><td colspan="11">{{ t('bulk.no.rows') }}</td></tr>{% endfor %}
+</tbody></table></div>{{ render_pagination(pagination) }}</section>
 {% endblock %}

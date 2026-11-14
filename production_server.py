@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from pathlib import Path
 
+from rop_service import ROP_TABLES
+
 APP_ROOT = Path(__file__).resolve().parent
 REQUIRED_TABLES = {
     'users',
@@ -33,6 +35,11 @@ REQUIRED_TABLES = {
     'expenses',
     'wheat_purchase_payments',
     'user_auth_versions',
+    'bulk_flour_batches',
+    'bunker_openings',
+    'flour_packaging',
+    'flour_packaging_lines',
+    *ROP_TABLES,
 }
 
 

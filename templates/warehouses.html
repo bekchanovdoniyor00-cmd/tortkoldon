@@ -1,41 +1,111 @@
 {% extends 'base.html' %}{% block content %}
 <h1>{{ t('warehouse.title') }}</h1>
 <section class="panel"><h2>{{ t('warehouse.wheat_stock') }}</h2><h2>{{ '%.2f'|format(wheat_stock/1000) }} {{ t('common.ton') }}</h2></section>
+<section class="panel"><h2>ROP</h2>
+<p>Oxirgi hujjatli fizik sanoq · {% if rop_measurement %}{{ '%.3f'|format(rop_measurement.qty_kg) }} kg · {{ rop_measurement.day|business_date }}{% else %}noma’lum{% endif %}</p>
+{% if rop_totals %}<p>Kirim · {{ rop_totals.received }} kg · kunlik tozalangan jami · {{ rop_totals.cleaned }} kg · hisobiy farq · {{ rop_totals.calculated_difference }} kg</p>{% endif %}
+</section>
 <section class="panel">
 <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
 <h2 style="margin:0">{{ t('warehouse.products_stock') }}</h2>
-{% if current_user.role=='buxgalter' and opening_products %}<button type="button" id="toggle-opening-stock" aria-expanded="false" aria-controls="opening-stock-form" style="background:#13834b;color:white;padding:8px 13px;border:0;border-radius:8px;font-weight:600">{{ t('warehouse.add_stock') }}</button>{% endif %}
+{% if current_user.role=='buxgalter' %}<button type="button" id="toggle-daily-stock" aria-expanded="false" aria-controls="daily-stock-form" style="background:#13834b;color:white;padding:8px 13px;border:0;border-radius:8px;font-weight:600">Omborga qo‘shish</button>{% endif %}
 </div>
 {% if current_user.role=='buxgalter' %}
+<form id="daily-stock-form" method="post" class="form-grid" style="display:none;margin:16px 0;padding:14px;border:1px solid #dce8df;border-radius:10px">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="daily_finished_stock"><input type="hidden" name="operation_token" value="{{ daily_token }}">
+<p class="wide" style="margin:0">Har kuni sanalgan tayyor mahsulotni kiriting. Ishlab chiqarish/qoplash orqali kiritilgan mahsulotni qayta kiritmang.</p>
+<label>Sana <input type="date" name="date" value="{{ today }}" max="{{ today }}" required></label>
+<label>Mahsulot <select name="product" id="daily-stock-product" required><option value="">Tanlang</option>{% for product in products %}<option value="{{ product }}">{{ product }}</option>{% endfor %}</select></label>
+<label id="daily-stock-kg-field">Miqdor (kg) <input type="number" name="qty_kg" min="0.01" max="300000" step="0.01" required></label>
+<div id="daily-stock-bag-fields" class="wide panel" style="display:none;margin:0">
+<h3 style="margin-top:0">Qoplangan tayyor mahsulot</h3><div class="form-grid">
+<label>25 kg qop soni <input type="number" name="bag_25_count" min="0" max="12000" step="1" value="0" disabled></label>
+<label>50 kg qop soni <input type="number" name="bag_50_count" min="0" max="12000" step="1" value="0" disabled></label>
+<p class="wide" style="margin:0">Jami: <output id="daily-stock-total" aria-live="polite">0</output> kg</p>
+</div></div>
+<label class="wide">Izoh / sanoq hujjati <input type="text" name="note" maxlength="500" placeholder="Masalan: kunlik ombor sanoq dalolatnomasi №..."></label>
+<div class="wide"><button type="submit">Kunlik kirimni saqlash</button></div>
+</form>
 {% if opening_products %}
+<button type="button" id="toggle-opening-stock" aria-expanded="false" aria-controls="opening-stock-form" style="margin-top:8px">Boshlang‘ich qoldiqni kiritish (alohida)</button>
 <form id="opening-stock-form" method="post" class="form-grid" style="display:none;margin:16px 0;padding:14px;border:1px solid #dce8df;border-radius:10px">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="opening_product_stock">
-<label>{{ t('common.date') }}<input type="date" name="date" value="{{ today }}" max="2099-12-31" required></label>
+<label>{{ t('common.date') }}<input type="date" name="date" value="{{ today }}" max="{{ today }}" required></label>
 <label>{{ t('warehouse.product_type') }}<select name="product" id="opening-stock-product" required><option value="">{{ t('common.select') }}</option>{% for product in opening_products %}<option value="{{ product }}">{{ product }}</option>{% endfor %}</select></label>
 <label id="opening-stock-kg-field">{{ t('warehouse.quantity_kg') }}<input type="number" name="qty_kg" min="0.01" step="0.01" required></label>
-<div id="opening-stock-bag-fields" class="wide panel" style="display:none;margin:0">
-<h3 style="margin-top:0">{{ t('warehouse.opening_bag_stock') }}</h3>
-<div class="form-grid">
-<label>{{ t('warehouse.bag_25') }} — {{ t('warehouse.opening_bag_count') }}<input type="number" name="bag_25_count" min="0" step="1" value="0"></label>
-<label>{{ t('warehouse.bag_50') }} — {{ t('warehouse.opening_bag_count') }}<input type="number" name="bag_50_count" min="0" step="1" value="0"></label>
-<p class="wide" style="margin:0">{{ t('warehouse.total_kg') }}: <output id="opening-stock-total-kg" aria-live="polite">0</output> {{ t('common.kg') }}</p>
-</div>
-</div>
+<div id="opening-stock-bag-fields" class="wide panel" style="display:none;margin:0"><h3>{{ t('warehouse.opening_bag_stock') }}</h3><div class="form-grid">
+<label>25 kg <input type="number" name="bag_25_count" min="0" step="1" value="0"></label>
+<label>50 kg <input type="number" name="bag_50_count" min="0" step="1" value="0"></label>
+<p class="wide">Jami: <output id="opening-stock-total-kg">0</output> kg</p>
+</div></div>
 <label class="wide">{{ t('common.note') }}<input type="text" name="note" maxlength="500"></label>
 <div class="wide"><button type="submit">{{ t('common.confirm') }}</button></div>
 </form>
-{% else %}<p style="margin-top:14px;color:#52665e">{{ t('warehouse.all_openings_exist') }}</p>{% endif %}
+{% endif %}
 {% endif %}
 <div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>{{ t('common.product') }}</th><th>{{ t('warehouse.stock_kg') }}</th><th>{{ t('warehouse.bag_25') }}</th><th>{{ t('warehouse.bag_50') }}</th></tr></thead><tbody>{% for name, qty in stocks.items() %}<tr><td>{{ name }}</td><td>{{ '%.2f'|format(qty) }}</td><td>{{ bagged_stocks[name][25] if name in bagged_stocks else '—' }}</td><td>{{ bagged_stocks[name][50] if name in bagged_stocks else '—' }}</td></tr>{% endfor %}</tbody></table></div>
 <p class="muted">{{ t('sales.stock_note') }}</p>
+{% if current_user.role=='buxgalter' %}
+<button type="button" id="toggle-dc65-adjustment" aria-expanded="false" aria-controls="dc65-adjustment-form">Qoldiqni tuzatish (+ / −)</button>
+<form id="dc65-adjustment-form" method="post" class="form-grid" style="display:none;margin:16px 0;padding:14px;border:1px solid #dce8df;border-radius:10px">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="action" value="finished_stock_adjustment">
+<input type="hidden" name="operation_token" value="{{ adjustment_token }}">
+<p class="wide" style="margin:0">Faqat haqiqiy fizik sanoq hujjatiga asosan. Musbat (+) miqdor qoldiqni oshiradi, manfiy (−) kamaytiradi. Oldingi kirim, sotuv va ishlab chiqarish yozuvlari o‘zgarmaydi.</p>
+<label>Mahsulot <select id="dc65-adjust-product" name="product" required><option value="">Tanlang</option>{% for product in products %}<option value="{{ product }}">{{ product }}</option>{% endfor %}</select></label>
+<label id="dc65-adjust-kg">Qoldiq farqi (kg) <input type="number" name="qty_delta_kg" step="0.01" min="-300000" max="300000" placeholder="+25.00 yoki -10.00" required></label>
+<div id="dc65-adjust-bags" class="wide panel" style="display:none;margin:0"><div class="form-grid">
+<label>25 kg qop farqi (+/−) <input type="number" name="bag_25_delta" value="0" step="1" min="-12000" max="12000" disabled></label>
+<label>50 kg qop farqi (+/−) <input type="number" name="bag_50_delta" value="0" step="1" min="-12000" max="12000" disabled></label>
+</div></div>
+<label class="wide">Sabab / inventarizatsiya dalolatnomasi <input type="text" name="reason" minlength="5" maxlength="500" required></label>
+<div class="wide"><button type="submit">Qoldiq tuzatishini saqlash</button></div>
+</form>
+{% endif %}
 </section>
 <section class="panel"><h2>{{ t('warehouse.opening_stock') }}</h2><div class="table-wrap"><table><thead><tr><th>{{ t('common.date') }}</th><th>{{ t('common.product') }}</th><th>{{ t('warehouse.quantity_kg') }}</th><th>{{ t('common.note') }}</th><th>{{ t('common.user') }}</th></tr></thead><tbody>{% for row in stock_openings %}<tr><td>{{ row.stock_date|business_date }}</td><td>{{ row.product }}</td><td>{{ '%.2f'|format(row.qty_kg) }}</td><td>{% if row.opening_bags %}{{ t('warehouse.bag_25') }} × {{ row.bag_25_count }}; {{ t('warehouse.bag_50') }} × {{ row.bag_50_count }}{% if row.note %}<br>{% endif %}{% endif %}{{ row.note or ('—' if not row.opening_bags else '') }}</td><td>{{ row.entered_by_name }}</td></tr>{% else %}<tr><td colspan="5">{{ t('warehouse.no_opening_stock') }}</td></tr>{% endfor %}</tbody></table></div></section>
-{% if current_user.role=='buxgalter' and opening_products %}<script>
+<section class="panel"><h2>Kunlik tayyor mahsulot kirimlari</h2>
+<p class="muted">Faqat haqiqiy sanoq bo‘yicha qo‘shilgan mahsulotlar. Ishlab chiqarish (ROP) hisobotlari bilan keyin alohida solishtiriladi.</p>
+<div class="table-wrap"><table><thead><tr><th>Sana</th><th>Mahsulot</th><th>Kirim (kg)</th><th>25 kg qop</th><th>50 kg qop</th><th>Izoh</th><th>Buxgalter</th>{% if current_user.role=='buxgalter' %}<th>Amal</th>{% endif %}</tr></thead><tbody>
+{% for row in daily_entries %}<tr><td>{{ row.receipt_date|business_date }}</td><td>{{ row.product }}</td><td>{{ '%.2f'|format(row.qty_kg) }}</td><td>{{ row.bag_25_count if row.product in opening_bagged_products else '—' }}</td><td>{{ row.bag_50_count if row.product in opening_bagged_products else '—' }}</td><td>{{ row.note or '—' }}</td><td>{{ row.entered_by_name }}</td>{% if current_user.role=='buxgalter' %}<td><a href="{{ url_for('warehouse_daily_receipt_edit',receipt_id=row.id) }}">✎ Tahrirlash</a></td>{% endif %}</tr>
+{% else %}<tr><td colspan="{{ 8 if current_user.role=='buxgalter' else 7 }}">Kunlik kirimlar hali yo‘q</td></tr>{% endfor %}</tbody></table></div>
+{% if daily_pagination.pages > 1 %}
+<nav aria-label="Kirim jurnali sahifalari"><p>Sahifa {{ daily_pagination.page }}/{{ daily_pagination.pages }} (jami {{ daily_pagination.total }} kirim)</p>
+{% if daily_pagination.page > 1 %}<a href="{{ url_for('warehouses',daily_page=daily_pagination.page-1,daily_per_page=daily_pagination.per_page) }}">Oldingi</a>{% endif %}
+{% if daily_pagination.page < daily_pagination.pages %}<a href="{{ url_for('warehouses',daily_page=daily_pagination.page+1,daily_per_page=daily_pagination.per_page) }}">Keyingi</a>{% endif %}
+</nav>{% endif %}</section>
+<section class="panel"><h2>Qoldiq tuzatishlari jurnali</h2>
+<p class="muted">Auditli + / − harakatlar. Ushbu jurnal asl kirim va sotuvni o‘zgartirmaydi.</p>
+<div class="table-wrap"><table><thead><tr><th>Sana</th><th>Mahsulot</th><th>Farq (kg)</th><th>25 kg qop</th><th>50 kg qop</th><th>Sabab</th><th>Buxgalter</th></tr></thead><tbody>
+{% for row in stock_adjustments %}<tr><td>{{ row.adjustment_date|business_date }}</td><td>{{ row.product }}</td><td>{{ '%+.2f'|format(row.qty_delta_kg) }}</td><td>{{ '%+d'|format(row.bag_25_delta) if row.product in opening_bagged_products else '—' }}</td><td>{{ '%+d'|format(row.bag_50_delta) if row.product in opening_bagged_products else '—' }}</td><td>{{ row.reason }}</td><td>{{ row.entered_by_name }}</td></tr>
+{% else %}<tr><td colspan="7">Hozircha qoldiq tuzatishlari yo‘q</td></tr>{% endfor %}
+</tbody></table></div>
+{% if adjustments_pagination.pages > 1 %}<nav aria-label="Tuzatish jurnali sahifalari">
+Sahifa {{ adjustments_pagination.page }}/{{ adjustments_pagination.pages }}
+{% if adjustments_pagination.page > 1 %}<a href="{{ url_for('warehouses',adj_page=adjustments_pagination.page-1,adj_per_page=adjustments_pagination.per_page) }}">Oldingi</a>{% endif %}
+{% if adjustments_pagination.page < adjustments_pagination.pages %}<a href="{{ url_for('warehouses',adj_page=adjustments_pagination.page+1,adj_per_page=adjustments_pagination.per_page) }}">Keyingi</a>{% endif %}
+</nav>{% endif %}
+</section>
+{% if current_user.role=='buxgalter' %}<script>
+const adjBtn=document.getElementById('toggle-dc65-adjustment'),adjForm=document.getElementById('dc65-adjustment-form');
+adjBtn.addEventListener('click',()=>{const o=adjForm.style.display==='none';adjForm.style.display=o?'grid':'none';adjBtn.setAttribute('aria-expanded',String(o))});
+const adjProduct=document.getElementById('dc65-adjust-product'),adjKg=document.getElementById('dc65-adjust-kg'),adjKgInput=adjKg.querySelector('input'),adjBags=document.getElementById('dc65-adjust-bags'),adjBag25=adjForm.elements.namedItem('bag_25_delta'),adjBag50=adjForm.elements.namedItem('bag_50_delta');
+function changeAdjFields(){const b={{ opening_bagged_products|tojson }}.includes(adjProduct.value);adjKg.style.display=b?'none':'block';adjKgInput.required=!b;adjKgInput.disabled=b;adjBags.style.display=b?'block':'none';adjBag25.disabled=!b;adjBag50.disabled=!b;}
+adjProduct.addEventListener('change',changeAdjFields);changeAdjFields();
+const dailyBtn=document.getElementById('toggle-daily-stock'), dailyForm=document.getElementById('daily-stock-form');
+dailyBtn.addEventListener('click',()=>{const opening=dailyForm.style.display==='none';dailyForm.style.display=opening?'grid':'none';dailyBtn.setAttribute('aria-expanded',String(opening))});
+const dailyProduct=dailyForm.elements.namedItem('product'),dailyKgLabel=document.getElementById('daily-stock-kg-field'),dailyKg=dailyForm.elements.namedItem('qty_kg'),dailyBags=document.getElementById('daily-stock-bag-fields'),daily25=dailyForm.elements.namedItem('bag_25_count'),daily50=dailyForm.elements.namedItem('bag_50_count'),dailyTotal=document.getElementById('daily-stock-total');
+const baggedProducts={{ opening_bagged_products|tojson }};
+function updateDailyFields(){const b=baggedProducts.includes(dailyProduct.value);dailyKgLabel.style.display=b?'none':'block';dailyKg.required=!b;dailyKg.disabled=b;dailyBags.style.display=b?'block':'none';daily25.disabled=!b;daily50.disabled=!b;}
+function updateDailyTotal(){dailyTotal.value=(25*Number(daily25.value||0)+50*Number(daily50.value||0)).toLocaleString('uz-UZ');}
+dailyProduct.addEventListener('change',updateDailyFields);daily25.addEventListener('input',updateDailyTotal);daily50.addEventListener('input',updateDailyTotal);updateDailyFields();updateDailyTotal();
+{% if opening_products %}
 const openingToggle=document.getElementById('toggle-opening-stock'),openingForm=document.getElementById('opening-stock-form');
 openingToggle.addEventListener('click',()=>{const open=openingForm.style.display==='none';openingForm.style.display=open?'grid':'none';openingToggle.setAttribute('aria-expanded',String(open))});
-const openingProduct=document.getElementById('opening-stock-product'),openingKgField=document.getElementById('opening-stock-kg-field'),openingKgInput=openingKgField.querySelector('input'),openingBagFields=document.getElementById('opening-stock-bag-fields'),openingBag25=openingForm.elements.namedItem('bag_25_count'),openingBag50=openingForm.elements.namedItem('bag_50_count'),openingTotal=document.getElementById('opening-stock-total-kg'),openingBaggedProducts={{ opening_bagged_products|tojson }};
-function updateOpeningStockFields(){const bagged=openingBaggedProducts.includes(openingProduct.value);openingKgField.style.display=bagged?'none':'block';openingKgInput.required=!bagged;openingKgInput.disabled=bagged;openingBagFields.style.display=bagged?'block':'none';openingBag25.disabled=!bagged;openingBag50.disabled=!bagged}
+const openingProduct=document.getElementById('opening-stock-product'),openingKgField=document.getElementById('opening-stock-kg-field'),openingKgInput=openingKgField.querySelector('input'),openingBagFields=document.getElementById('opening-stock-bag-fields'),openingBag25=openingForm.elements.namedItem('bag_25_count'),openingBag50=openingForm.elements.namedItem('bag_50_count'),openingTotal=document.getElementById('opening-stock-total-kg');
+function updateOpeningStockFields(){const bagged=baggedProducts.includes(openingProduct.value);openingKgField.style.display=bagged?'none':'block';openingKgInput.required=!bagged;openingKgInput.disabled=bagged;openingBagFields.style.display=bagged?'block':'none';openingBag25.disabled=!bagged;openingBag50.disabled=!bagged}
 function updateOpeningStockTotal(){openingTotal.value=(25*Number(openingBag25.value||0)+50*Number(openingBag50.value||0)).toLocaleString('uz-UZ')}
 openingProduct.addEventListener('change',updateOpeningStockFields);openingBag25.addEventListener('input',updateOpeningStockTotal);openingBag50.addEventListener('input',updateOpeningStockTotal);updateOpeningStockFields();updateOpeningStockTotal();
+{% endif %}
 </script>{% endif %}
 {% endblock %}

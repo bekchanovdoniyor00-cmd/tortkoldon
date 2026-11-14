@@ -72,7 +72,7 @@
     const data=await res.json();if(seq!==editSequence)return;
     editBox.replaceChildren();
     if(!data.customers.length)editBox.textContent=ui.notFound;
-    data.customers.forEach(c=>{
+    data.customers.filter(c=>c.id!=null).forEach(c=>{
      const btn=document.createElement('button');btn.type='button';btn.textContent=c.name+' — '+c.phone;
      btn.style.display='block';btn.style.margin='4px';
      btn.onclick=()=>{++editSequence;editSearch.value=c.name+' — '+c.phone;editId.value=c.id;editName.value=c.name;editPhone.value=c.phone;editSubmit.disabled=false;editBox.style.display='none';};
