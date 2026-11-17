@@ -91,20 +91,52 @@ function add(){if(wrap.children.length>=15)return;
  '<span class="ms-field count-wrap">'+ui.bagCount+'<input class="count" type="number" min="1" step="1" value="1" required></span>'+
  '<span class="ms-field qty-wrap">'+ui.kilograms+'<input class="qty" type="number" min="0.01" step="any"></span>'+
  field('<span class="unit-price-label">'+ui.bagPrice+'</span>','<input class="price" type="number" min="0.01" step="any" required>')+
- field(ui.productTotal,'<input class="line-total" readonly tabindex="-1">')+'</div><p class="ms-stock-error" aria-live="polite"></p>';
- wrap.appendChild(row);row.querySelector('.p').addEventListener('change',()=>update(row));row.querySelector('.mode').addEventListener('change',()=>update(row));row.querySelectorAll('input').forEach(x=>x.addEventListener('input',calc));row.querySelector('.remove').onclick=()=>{if(wrap.children.length>1){row.remove();renumber();calc()}};renumber();update(row);
+ field(ui.productTotal,'<input class="line-total" type="number" min="0.01" step="0.01" inputmode="decimal" required>')+'</div><p class="ms-stock-error" aria-live="polite"></p>';
+ wrap.appendChild(row);row.querySelector('.p').addEventListener('change',()=>update(row));row.querySelector('.mode').addEventListener('change',()=>update(row));row.dataset.priceSource='unit';row.querySelector('.price').addEventListener('input',()=>{row.dataset.priceSource='unit';calc()});row.querySelector('.line-total').addEventListener('input',()=>{row.dataset.priceSource='total';calc()});row.querySelectorAll('.count,.qty').forEach(x=>x.addEventListener('input',calc));row.querySelector('.remove').onclick=()=>{if(wrap.children.length>1){row.remove();renumber();calc()}};renumber();update(row);
 }
 function renumber(){[...wrap.children].forEach((r,i)=>r.querySelector('.n').textContent=i+1)}
-function calc(){let total=0;for(const row of wrap.children){const bag=row.querySelector('.mode').value==='qop';const quantity=bag?num(row.querySelector('.count').value):num(row.querySelector('.qty').value);const price=num(row.querySelector('.price').value);const amount=quantity*price;row.querySelector('.line-total').value=formatter.format(amount);total+=amount}
- const paid=[...document.querySelectorAll('.pay-value')].reduce((s,e)=>s+num(e.value),0);
- document.getElementById('sale-total').textContent=formatter.format(total)+' '+ui.som;document.getElementById('sale-paid').textContent=formatter.format(paid)+' '+ui.som;document.getElementById('sale-debt').textContent=formatter.format(Math.max(0,total-paid))+' '+ui.som;document.getElementById('sale-debt').style.color=paid>total+0.001?'#bd392d':'#126049';checkStock();}
+// All monetary totals are integer tiyin. The last edited field is authoritative.
+function cents(v){const n=Number(v);return Number.isFinite(n)?Math.round((n+Number.EPSILON*n)*100):NaN}
+function lineCents(row){
+ const isBag=row.querySelector('.mode').value==='qop';
+ const units=isBag?num(row.querySelector('.count').value):num(row.querySelector('.qty').value);
+ const priceInput=row.querySelector('.price'),totalInput=row.querySelector('.line-total');
+ if(row.dataset.priceSource==='total'){
+   // Preserve exactly the manually supplied total, even for 3/7/... bags.
+   const amount=cents(totalInput.value);
+   priceInput.value=units>0 && totalInput.value!=='' && Number.isFinite(amount) && amount>0
+     ?String(Number(((amount/100)/units).toPrecision(15))):'';
+   return amount;
+ }
+ const amount=units>0 && priceInput.value!==''?cents(units*num(priceInput.value)):0;
+ totalInput.value=units>0 && priceInput.value!=='' && Number.isFinite(amount) && amount>0
+   ?(amount/100).toFixed(2):'';
+ return amount;
+}
+function calc(){
+ let totalCents=0;
+ for(const row of wrap.children){
+   const amount=lineCents(row);
+   if(Number.isFinite(amount))totalCents+=amount;
+ }
+ const paidCents=[...document.querySelectorAll('.pay-value')].reduce((s,e)=>s+cents(e.value||0),0);
+ const total=totalCents/100,paid=paidCents/100;
+ document.getElementById('sale-total').textContent=formatter.format(total)+' '+ui.som;
+ document.getElementById('sale-paid').textContent=formatter.format(paid)+' '+ui.som;
+ document.getElementById('sale-debt').textContent=formatter.format(Math.max(0,(totalCents-paidCents)/100))+' '+ui.som;
+ document.getElementById('sale-debt').style.color=paidCents>totalCents?'#bd392d':'#126049';
+ checkStock();
+}
  document.getElementById('add-item').onclick=add;document.querySelectorAll('.pay-value').forEach(x=>x.addEventListener('input',calc));add();loadStock();
  form.addEventListener('submit',e=>{
   if(!checkStock()){e.preventDefault();return;}
- const items=[...wrap.children].map(r=>({product:r.querySelector('.p').value,sale_mode:r.querySelector('.mode').value,bag_kg:r.querySelector('.bag').value,bag_count:r.querySelector('.count').value,qty_kg:r.querySelector('.qty').value,price:r.querySelector('.price').value}));
- const total=items.reduce((s,i)=>s+(i.sale_mode==='qop'?num(i.bag_count):num(i.qty_kg))*num(i.price),0);
- const paid=[...document.querySelectorAll('.pay-value')].reduce((s,x)=>s+num(x.value),0);
- if(total<=0||paid>total+0.001){e.preventDefault();alert(ui.saleCheck);return;}
+ const items=[...wrap.children].map(r=>({product:r.querySelector('.p').value,sale_mode:r.querySelector('.mode').value,bag_kg:r.querySelector('.bag').value,bag_count:r.querySelector('.count').value,qty_kg:r.querySelector('.qty').value,price:r.querySelector('.price').value,line_total:r.querySelector('.line-total').value,price_source:r.dataset.priceSource||'unit'}));
+ // Send the exact manually-entered line total, not a rounded unit-price product.
+ const validAmount=v=>v!==''&&Number.isFinite(Number(v))&&Number(v)>0&&Math.abs(Number(v)*100-Math.round(Number(v)*100))<0.000001;
+ const invalidItem=items.some(i=>!validAmount(i.line_total)||!Number.isFinite(Number(i.price))||Number(i.price)<=0);
+ const totalCents=items.reduce((s,i)=>s+cents(i.line_total),0);
+ const paidCents=[...document.querySelectorAll('.pay-value')].reduce((s,x)=>s+cents(x.value||0),0);
+ if(invalidItem||!Number.isSafeInteger(totalCents)||totalCents<=0||paidCents>totalCents){e.preventDefault();alert(ui.saleCheck);return;}
  document.getElementById('items-json').value=JSON.stringify(items);
  if(!confirm(ui.saveConfirm))e.preventDefault();
  });
