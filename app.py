@@ -966,6 +966,32 @@ def worker_multi_sale():
                  bag_kg=item.get('bag_kg'),bag_count=item.get('bag_count'),
                  qty_kg=item.get('qty_kg'),price=item.get('price'),paid='0')
             product,mode,bag_kg,count,unit_price,qty,total,_ = sale_values(row)
+            # Optional explicit line total: valid for multi-product form only.
+            # Legacy callers with no line_total keep their original behavior.
+            raw_line_total = item.get('line_total')
+            if raw_line_total is not None:
+                try:
+                    exact_total = Decimal(str(raw_line_total))
+                    if not exact_total.is_finite() or exact_total <= 0:
+                        raise ValueError('Mahsulot jami musbat summa bo‘lishi kerak.')
+                    rounded_total = exact_total.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    if rounded_total != exact_total:
+                        raise ValueError('Mahsulot jami tiyingacha aniq kiritilsin.')
+                    price_source = item.get('price_source', 'unit')
+                    if price_source not in ('unit', 'total'):
+                        raise ValueError('Narx manbasi noto‘g‘ri.')
+                    units = Decimal(str(count if mode == 'qop' else qty))
+                    if price_source == 'unit':
+                        typed_price = Decimal(str(item['price']))
+                        expected_total = (typed_price * units).quantize(
+                            Decimal('0.01'), rounding=ROUND_HALF_UP)
+                        if expected_total != exact_total:
+                            raise ValueError('Qop/kg narxi bilan mahsulot jami mos emas.')
+                    # Manual total is the monetary source of truth, preserving exact tiyin.
+                    total = float(exact_total)
+                    unit_price = float(exact_total / units)
+                except (InvalidOperation, OverflowError) as exc:
+                    raise ValueError('Mahsulot jami noto‘g‘ri.') from exc
             if product not in WORKER_PRODUCTS[user['role']]:
                 raise ValueError('Bu mahsulot sizga biriktirilmagan.')
             if total<=0: raise ValueError('Mahsulot narxi musbat bo‘lsin.')

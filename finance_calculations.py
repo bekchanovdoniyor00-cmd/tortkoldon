@@ -16,7 +16,7 @@ obligations: keep legacy money unallocated and report the ambiguity. Do not
 infer identity from similar names or change dates.
 """
 
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 from collections import defaultdict
 import re
 
@@ -247,7 +247,9 @@ Cancelled-sale money is retained as an exception, never silently refunded.
             if initial:
                 warnings.append({'code': 'cancelled_sale_initial_payment', 'sale_id': sid, 'amount': initial})
             continue
-        total = money(row['qty_kg']) * money(row['price_per_kg'])
+        # Monetary sales are settled to cents: ignore binary-price residue.
+        total = (money(row['qty_kg']) * money(row['price_per_kg'])).quantize(
+            Decimal('0.01'), rounding=ROUND_HALF_UP)
         paid = linked.get(sid, zero)
         key, customer_id = canonical_identity(row['customer'], row['customer_phone'])
         g = group(key, customer_id)
