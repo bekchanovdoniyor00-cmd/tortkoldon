@@ -19,9 +19,15 @@ def render_invoices_page(*, INVOICE_GROUPS, db, paginate_rows, render_template, 
         instr(lower(COALESCE(s.customer_phone,'')),lower(?))>0 OR
         instr(lower(COALESCE(s.product,'')),lower(?))>0 OR
         instr(printf('%.2f',COALESCE(s.qty_kg,0)),lower(?))>0 OR
-        instr(CAST(i.number AS TEXT),?)>0
+        instr(CAST(i.number AS TEXT),?)>0 OR
+        (s.user_id IN (3,4) AND instr(lower(
+           (CASE s.user_id WHEN 3 THEN 'U-' WHEN 4 THEN 'M-' END) ||
+             printf('%03d', (SELECT COUNT(*) FROM invoices j
+                    JOIN sales sj ON sj.id=j.sale_id
+                    WHERE sj.user_id=s.user_id AND j.month_key=i.month_key AND j.id<=i.id))
+           ), lower(?))>0)
     )"""
-    search_params=(search,search,search,search,search,search,search,search)
+    search_params=(search,search,search,search,search,search,search,search,search)
     with db() as con:
         rows,pagination=paginate_rows(
             con,

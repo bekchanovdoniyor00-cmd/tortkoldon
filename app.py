@@ -596,6 +596,19 @@ def set_language():
         target = '/'
     return redirect(target)
 
+# DC_EMPLOYEE_INVOICE_LABELS_20261123_START
+from dc_invoice_numbering import employee_invoice_label
+
+@app.template_filter('dc_employee_invoice_no')
+def dc_employee_invoice_no(invoice_id):
+    # Only a read-only invoice lookup; never changes financial tables.
+    con = db()
+    try:
+        return employee_invoice_label(con, invoice_id)
+    finally:
+        con.close()
+# DC_EMPLOYEE_INVOICE_LABELS_20261123_END
+
 def ensure_invoice(con, sale_id, product, sale_date):
     sale_day, _ = _business_date(sale_date)
     existing = con.execute('SELECT id FROM invoices WHERE sale_id=?', (sale_id,)).fetchone()
@@ -2385,9 +2398,80 @@ def invoice_print(invoice_id):
     group_name = INVOICE_GROUPS.get(row['product'], ('boshqa','Boshqa'))[1]
     return render_template('invoice_print.html', r=row, group_name=group_name)
 
+# DC_UNIVERSAL_INVOICE_EDIT_20261123_START
+from dc_invoice_universal import (load as dc_invoice_load,
+    validate_changes as dc_invoice_validate, apply as dc_invoice_apply,
+    old_channels as dc_invoice_channels)
+from temporal_stock import validate_timeline as dc_invoice_timeline
+
+@app.route('/nakladnoy/tahrirlash/<int:invoice_id>', methods=['GET','POST'])
+@login_required
+def dc_universal_invoice_edit(invoice_id):
+    if session.get('role') != 'buxgalter':
+        abort(403)
+    serializer = URLSafeSerializer(app.secret_key, salt='dc-universal-invoice-edit-20261123-v1')
+    if request.method == 'POST':
+        try:
+            # An SQLite backup is mandatory before even opening a write transaction.
+            safe_copy = make_backup()
+            if not safe_copy.is_file() or safe_copy.stat().st_size < 1000:
+                raise ValueError('DB zaxira nusxasi tasdiqlanmadi. Saqlash to‘xtatildi.')
+            with db() as con:
+                con.execute('BEGIN IMMEDIATE')
+                ctx = dc_invoice_load(con, invoice_id)
+                try:
+                    token = serializer.loads(request.form.get('edit_token', ''))
+                except BadSignature as exc:
+                    raise ValueError('Tahrirlash formasi yaroqsiz. Qayta oching.') from exc
+                if not isinstance(token, dict) or token.get('user_id') != session['user_id'] or token.get('invoice_id') != invoice_id or token.get('state') != ctx:
+                    raise ValueError('Nakladnoy boshqa joyda o‘zgargan. Sahifani qayta oching.')
+                change = dc_invoice_validate(ctx, request.form,
+                    products=PRODUCTS, bag_options=BAG_OPTIONS,
+                    loose_products=LOOSE_PRODUCTS, worker_products=WORKER_PRODUCTS)
+                dc_invoice_apply(con, ctx, change, actor=session['user_id'],
+                    product_stocks=product_stocks, bagged_product_stocks=bagged_product_stocks,
+                    record_bagged_sale=record_bagged_sale,
+                    validate_timeline=dc_invoice_timeline,
+                    worker_channel_balances=worker_channel_balances,
+                    invoice_groups=INVOICE_GROUPS)
+            flash('Nakladnoy muvaffaqiyatli tahrirlandi. Kassa/qarz/ombor qayta tekshirildi.', 'success')
+            return redirect(url_for('invoices_page'))
+        except (ValueError, TypeError, KeyError, OverflowError, InvalidOperation, sqlite3.Error, RuntimeError) as exc:
+            flash(str(exc) or 'Nakladnoy o‘zgarmadi.', 'error')
+            return redirect(url_for('dc_universal_invoice_edit',invoice_id=invoice_id))
+    try:
+        with db() as con:
+            ctx = dc_invoice_load(con, invoice_id)
+            label = employee_invoice_label(con,invoice_id)
+        signer = serializer.dumps({'user_id':session['user_id'],
+            'invoice_id':invoice_id,'state':ctx})
+        d = _business_date_input(ctx['invoice']['issued_date'])
+        payments=dc_invoice_channels(ctx)
+        allowed=WORKER_PRODUCTS['umid' if ctx['anchor']['user_id']==3 else 'maxmud']
+        return render_template('dc_invoice_edit.html',ctx=ctx,invoice_label=label,
+            edit_token=signer,date_iso=d,channels=payments,
+            receipt_totals={s['id']:sum(float(r['amount']) for r in ctx['receipts'][str(s['id'])])
+                            for s in ctx['sales']},
+            allowed_products=allowed,bag_options=BAG_OPTIONS,loose_products=LOOSE_PRODUCTS)
+    except (ValueError,TypeError,KeyError,sqlite3.Error) as exc:
+        flash(str(exc) or 'Nakladnoyni tekshirishda xato.', 'error')
+        return redirect(url_for('invoices_page'))
+# DC_UNIVERSAL_INVOICE_EDIT_20261123_END
+
 @app.route('/sotuv/tahrirlash/<int:sale_id>', methods=['GET','POST'])
 @login_required
 def edit_sale(sale_id):
+    # Existing sales history can link non-anchor batch lines here. Redirect all invoiced sales.
+    with db() as dc_con:
+        dc_inv=dc_con.execute('SELECT id FROM invoices WHERE sale_id=?',(sale_id,)).fetchone()
+        if dc_inv is None:
+            dc_inv=dc_con.execute("""SELECT i.id FROM worker_sale_batch_items bi
+                 JOIN worker_sale_batch_items anchor ON anchor.batch_id=bi.batch_id
+                 JOIN invoices i ON i.sale_id=anchor.sale_id
+                 WHERE bi.sale_id=? ORDER BY i.id LIMIT 1""",(sale_id,)).fetchone()
+    if dc_inv is not None:
+        if request.method != 'GET': abort(405)
+        return redirect(url_for('dc_universal_invoice_edit',invoice_id=dc_inv['id']))
     with db() as con:
         if request.method == 'POST':
             con.execute('BEGIN IMMEDIATE')

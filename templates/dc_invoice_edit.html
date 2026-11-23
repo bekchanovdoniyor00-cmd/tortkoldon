@@ -1,0 +1,106 @@
+{% extends 'base.html' %}
+{% block content %}
+<style>
+.dc-ie{max-width:1300px;margin:auto}.dc-ie .dc-panel{background:#fff;border:1px solid #dbe8df;border-radius:14px;padding:20px;margin:14px 0}.dc-ie h1{margin-bottom:5px}.dc-ie label{display:block;color:#203d34;font-weight:600;font-size:13px}.dc-ie input,.dc-ie select,.dc-ie textarea{display:block;width:100%;margin-top:5px;box-sizing:border-box;padding:10px;border-radius:8px;border:1px solid #cadbd1;font:inherit;background:#fff}.dc-ie .g{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.dc-ie table{width:100%;border-collapse:collapse;min-width:1050px}.dc-ie th,.dc-ie td{border-bottom:1px solid #e3e9e5;padding:8px;text-align:left}.dc-ie td input,.dc-ie td select{min-width:90px}.dc-ie .tablewrap{overflow-x:auto}.dc-ie .muted{color:#65766e}.dc-ie .sum{font-size:18px;font-weight:700;color:#17674c}.dc-ie button{border:0;padding:12px 20px;background:#087856;color:#fff;border-radius:10px;font-weight:700;cursor:pointer}.dc-ie .error{color:#b42318}.dc-ie .warning{background:#fff3df;border-radius:10px;padding:12px}.dc-ie .actions{display:flex;gap:15px;align-items:center}.dc-ie small{font-weight:400}@media(max-width:750px){.dc-ie .g{grid-template-columns:1fr}.dc-ie .dc-panel{padding:13px}}
+</style>
+<div class="dc-ie">
+  <h1>Nakladnoy №{{ invoice_label }} — tahrirlash</h1>
+  <p class="muted">Buxgalter · Har qanday faol nakladnoy · raqam va oy saqlanadi · barcha o‘zgarishlar auditga yoziladi</p>
+  <form method="post" id="dc-invoice-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <input type="hidden" name="edit_token" value="{{ edit_token }}">
+    <input type="hidden" name="items_json" id="dc-items-json">
+    <div class="dc-panel">
+      <h3>1. Hujjat ma’lumotlari</h3>
+      <div class="g">
+        <label>Sana <small>(shu oy ichida)</small><input type="date" name="date" required value="{{ date_iso }}"></label>
+        <label>Xaridor<input name="customer" value="{{ ctx['sales'][0]['customer'] }}" required></label>
+        <label>Telefon<input name="customer_phone" value="{{ ctx['sales'][0]['customer_phone'] }}" required></label>
+      </div>
+      <p class="muted">Xaridorni almashtirganda eski to‘lovlar va xaridor kartasi bog‘lanishi tekshiriladi.</p>
+    </div>
+    <div class="dc-panel">
+      <h3>2. Nakladnoydagi mahsulotlar</h3>
+      <div class="tablewrap"><table id="dc-edit-rows">
+        <thead><tr><th>Mahsulot</th><th>Usul</th><th>Qop kg</th><th>Qop soni</th><th>Kg</th><th>Qop/kg narxi</th><th>Jami</th><th>Keyingi real to‘lov</th><th>Izoh</th></tr></thead>
+        <tbody>
+        {% for s in ctx['sales'] %}
+        <tr data-sale-id="{{ s['id'] }}">
+          <td><select class="p" required>{% for p in allowed_products %}<option value="{{ p }}" {% if p == s['product'] %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></td>
+          <td><select class="mode"><option value="qop" {% if s['sale_mode']=='qop' %}selected{% endif %}>Qopda</option><option value="kg" {% if s['sale_mode']=='kg' %}selected{% endif %}>Kg</option></select></td>
+          <td><select class="bag" data-original="{{ s['bag_kg'] or '' }}"></select></td>
+          <td><input class="count" type="number" step="1" min="1" value="{{ s['bag_count'] or 1 }}"></td>
+          <td><input class="qty" type="number" step="0.01" min="0.01" value="{{ s['qty_kg'] }}"></td>
+          <td><input class="price" type="number" step="any" min="0.000001" value="{{ s['unit_price'] if s['unit_price'] is not none else s['price_per_kg'] }}"></td>
+          <td><strong class="line-total">—</strong></td>
+          <td>{{ '%.2f'|format(receipt_totals[s['id']]) }} so‘m</td>
+          <td><input class="note" value="{{ s['note'] or '' }}"></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table></div>
+      <p>Umumiy savdo: <span id="dc-total" class="sum">—</span></p>
+      <p class="muted">Mavjud mahsulot satrlari tahrirlanadi. Satrlarni o‘chirish yoki yangisini qo‘shish bu oynada ko‘zda tutilmagan.</p>
+    </div>
+    <div class="dc-panel">
+      <h3>3. Dastlabki to‘lov</h3>
+      {% if ctx['batch'] %}
+      <div class="g">
+        <label>Naqd, so‘m<input type="number" step="0.01" min="0" name="pay_naqd" class="initial" value="{{ '%.2f'|format(channels.naqd/100) }}"></label>
+        <label>Plastik, so‘m<input type="number" step="0.01" min="0" name="pay_plastik" class="initial" value="{{ '%.2f'|format(channels.plastik/100) }}"></label>
+        <label>Hisob, so‘m<input type="number" step="0.01" min="0" name="pay_hisob" class="initial" value="{{ '%.2f'|format(channels.hisob/100) }}"></label>
+      </div>
+      <p class="muted">Batchning barcha mahsulotlariga dastlabki to‘lovlar ketma-ket taqsimlanadi. Keyingi real to‘lovlar o‘zgarmaydi.</p>
+      {% else %}
+      <div class="g">
+        <label>To‘langan, so‘m<input type="number" step="0.01" min="0" name="paid" class="initial" value="{{ '%.2f'|format(ctx['sales'][0]['paid']) }}"></label>
+        <label>To‘lov usuli<select name="payment_method">{% for method,name in [('naqd','Naqd'),('plastik','Plastik'),('hisob','Hisob')] %}<option value="{{ method }}" {% if ctx['sales'][0]['payment_method']==method %}selected{% endif %}>{{ name }}</option>{% endfor %}</select></label>
+      </div>
+      {% endif %}
+      <p>Dastlabki to‘lov: <b id="dc-paid">—</b> · Savdodan qolgan summa: <b id="dc-balance">—</b></p>
+      <div class="warning">To‘lovni o‘zgartirish xodim kassasiga va qarzga ta’sir qiladi. Haqiqiy olingan pul miqdorigagina tuzatish kiriting. Oldingi to‘lovlar tarixda saqlanadi.</div>
+    </div>
+    <div class="dc-panel">
+      <label>Tahrirlash sababi (majburiy)<textarea name="reason" rows="2" minlength="8" required placeholder="Masalan: hujjatda qop soni noto‘g‘ri kiritilgan"></textarea></label>
+      <p class="error" id="dc-edit-error" hidden></p>
+      <div class="actions"><button type="submit">Tekshirish va saqlash</button><a href="{{ url_for('invoices_page') }}">Arxivga qaytish</a></div>
+    </div>
+  </form>
+</div>
+<script>
+(function(){
+ const BAGS={{ bag_options|tojson }},LOOSE={{ loose_products|tojson }};
+ const rows=[...document.querySelectorAll('#dc-edit-rows tbody tr')],form=document.getElementById('dc-invoice-form');
+ const fmt=n=>new Intl.NumberFormat('uz-UZ',{minimumFractionDigits:2,maximumFractionDigits:2}).format(n)+' so‘m';
+ function number(el){const x=Number(el.value);return Number.isFinite(x)?x:0}
+ function refresh(r){
+   const p=r.querySelector('.p'),m=r.querySelector('.mode'),bag=r.querySelector('.bag'),c=r.querySelector('.count'),q=r.querySelector('.qty'),price=r.querySelector('.price');
+   let old=bag.value||bag.dataset.original;bag.replaceChildren();(BAGS[p.value]||[]).forEach(x=>bag.add(new Option(x+' kg',x)));
+   const chosen=[...bag.options].find(o=>Number(o.value)===Number(old));if(chosen)bag.value=chosen.value;
+   const mayLoose=LOOSE.includes(p.value);if(!mayLoose && m.value==='kg')m.value='qop';
+   m.querySelector('[value="kg"]').disabled=!mayLoose;
+   const byBag=m.value==='qop';bag.disabled=!byBag;c.disabled=!byBag;q.disabled=byBag;
+   const units=byBag?number(c):number(q),total=units*number(price);
+   r.querySelector('.line-total').textContent=fmt(total);
+   return total;
+ }
+ function calc(){const total=rows.reduce((sum,r)=>sum+refresh(r),0),paid=[...document.querySelectorAll('.initial')].reduce((sum,x)=>sum+number(x),0);
+   document.getElementById('dc-total').textContent=fmt(total);document.getElementById('dc-paid').textContent=fmt(paid);
+   document.getElementById('dc-balance').textContent=fmt(total-paid);}
+ for(const r of rows){const x=r.querySelectorAll('input,select');for(const n of x)n.addEventListener('change',()=>{if(n.classList.contains('p'))r.querySelector('.bag').dataset.original='';calc()});for(const n of x)n.addEventListener('input',calc);}
+ document.querySelectorAll('.initial').forEach(x=>x.addEventListener('input',calc));
+ calc();
+ form.addEventListener('submit',e=>{
+   const items=rows.map(r=>({sale_id:Number(r.dataset.saleId),product:r.querySelector('.p').value,mode:r.querySelector('.mode').value,
+     bag_kg:r.querySelector('.bag').value,bag_count:r.querySelector('.count').value,qty_kg:r.querySelector('.qty').value,
+     unit_price:r.querySelector('.price').value,note:r.querySelector('.note').value}));
+   document.getElementById('dc-items-json').value=JSON.stringify(items);
+   const total=rows.reduce((sum,r)=>{const byBag=r.querySelector('.mode').value==='qop';return sum+number(r.querySelector('.price'))*(byBag?number(r.querySelector('.count')):number(r.querySelector('.qty')));},0);
+   const paid=[...document.querySelectorAll('.initial')].reduce((sum,x)=>sum+number(x),0);
+   const error=document.getElementById('dc-edit-error');
+   if(paid>total+0.009){e.preventDefault();error.hidden=false;error.textContent='To‘lov jami savdo summasidan katta.';return}
+   if(!confirm('Nakladnoydagi o‘zgarishlar, qarz va kassa qayta hisoblanadi. Tasdiqlaysizmi?'))e.preventDefault();
+ });
+})();
+</script>
+{% endblock %}
