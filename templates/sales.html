@@ -1,5 +1,5 @@
 {% extends 'base.html' %}{% from '_pagination.html' import render_pagination with context %}{% block content %}<h1>{{ t('sales.title') }}</h1><section class="panel customer-search-panel"><form method="post" class="form-grid" autocomplete="off"><input type="hidden" name="operation_token" value="{{ accountant_sale_token() }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>{{ t('common.date') }}<input type="date" name="date"></label>
+<label>{{ t('common.date') }} — sotuv sanasi<input type="date" name="date" value="{{ sale_today_iso }}" max="{{ sale_today_iso }}" lang="uz-UZ" required><small>Oldingi kun uchun ham sotuv kiritish mumkin.</small></label>
 <div class="customer-field"><label for="customer-name">{{ t('sales.customer_name') }}</label><input id="customer-name" name="customer" required autocomplete="off"><div id="customer-suggestions" class="suggestions" hidden></div></div>
 <label>{{ t('sales.phone_required') }}<input id="customer-phone" name="customer_phone" type="tel" required></label>
 

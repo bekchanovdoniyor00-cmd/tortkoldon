@@ -13,6 +13,8 @@ from finance_calculations import (
     resolve_customer_identity, resolve_customer_name,
 )
 from date_conversions import dmy_to_date, iso_to_date
+# DC_SALE_BUSINESS_DATE_20261125
+from dc_sale_date import business_today_iso, selected_sale_date
 from business_dates import (
     _business_date,
     _business_date_after,
@@ -576,6 +578,7 @@ def inject_globals():
         'roles': ROLES,
         'ui_language': language,
         'ui_date_locale': 'uz-Cyrl-UZ' if language == 'uz-Cyrl' else 'uz-Latn-UZ',
+        'sale_today_iso': business_today_iso(),
         'language_options': LANGUAGES,
         't': lambda key: translate(key, language),
     }
@@ -902,7 +905,7 @@ def worker_new_sale():
         key=phone_key(phone)
         if not customer or not key: raise ValueError('Xaridor ismi va to‘g‘ri telefon raqami majburiy.')
         selected=request.form.get('customer_id','').strip()
-        today=date.today().isoformat()
+        today=selected_sale_date(request.form)
         with db() as con:
             con.execute('BEGIN IMMEDIATE')
             token = request.form.get('operation_token', '')
@@ -1023,7 +1026,7 @@ def worker_multi_sale():
             payments[method]=round(value*100)
         paid_cents=sum(payments.values())
         if paid_cents>total_cents: raise ValueError('To‘lov jami sotuvdan oshmasin.')
-        today=date.today().isoformat()
+        today=selected_sale_date(request.form)
         with db() as con:
             con.execute('BEGIN IMMEDIATE')
             existing=con.execute('SELECT * FROM customers WHERE phone_key=?',(key,)).fetchone()
@@ -2268,7 +2271,7 @@ def sales_page():
             customer = request.form.get('customer','').strip()
             if not customer or not request.form.get('customer_phone','').strip():
                 raise ValueError('Xaridor nomi va telefon raqami majburiy.')
-            sale_date = _html_date_storage(request.form.get('date') or date.today().isoformat())
+            sale_date = _business_date_storage(selected_sale_date(request.form))
             due = _business_date_storage(_business_date_after(sale_date,25)) if total - paid > 0.009 else ''
             with db() as con:
                 con.execute('BEGIN IMMEDIATE')
